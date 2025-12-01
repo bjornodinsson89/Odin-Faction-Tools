@@ -4,6 +4,7 @@
 // @version      2.0
 // @description  Faction Tools
 // @author       BjornOdinsson89
+// @downloadurl  https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/refs/heads/main/Odin-user.js
 // @match        https://www.torn.com/*
 // @match        https://www2.torn.com/*
 // @grant        GM_notification
