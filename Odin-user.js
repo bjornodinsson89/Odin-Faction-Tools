@@ -4,7 +4,6 @@
 // @version      2.0
 // @description  Faction Tools
 // @author       BjornOdinsson89
-// @downloadurl  https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/refs/heads/main/Odin-user.js
 // @match        https://www.torn.com/*
 // @match        https://www2.torn.com/*
 // @grant        GM_notification
@@ -14,9 +13,29 @@
 // @connect      raw.githubusercontent.com
 // @connect      api.torn.com
 // @connect      worldtimeapi.org
+// @connect      torn-war-room-default-rtdb.firebaseio.com
+// @connect      torn-war-room.firebasestorage.app
+// @require      https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/main/modules/colonel.js
+// @require      https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/main/modules/odin-warcore.js
+// @require      https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/main/modules/odin-ui.js
 // ==/UserScript==
 
 'use strict';
+
+// Lightweight event bus for inter-module messaging
+const Nexus = {
+  _listeners: {},
+  on(evt, fn) {
+    (this._listeners[evt] = this._listeners[evt] || []).push(fn);
+  },
+  emit(evt, payload) {
+    const L = this._listeners[evt];
+    if (L) for (const fn of L) try { fn(payload); } catch (e) { console.error(e); }
+  },
+  log(msg) { console.log(`[ODIN:NEXUS] ${msg}`); }
+};
+
+window.OdinModules = window.OdinModules || [];
 
 const dbName = "OdinDB";
 const dbVersion = 3;
@@ -3922,4 +3941,24 @@ BaseModule._apiModule.registerState(state);
       logic.addProfileButtons();
     }
   }
+  // === ODIN MODULE INITIALIZATION ===
+try {
+  const OdinContext = {
+    nexus: Nexus,
+    getState: () => Odin.state,
+    updateState: (fn) => { fn(Odin.state); },
+    api: BaseModule._apiModule,
+    ui: OdinUserInterface
+  };
+
+  if (window.OdinModules && Array.isArray(window.OdinModules)) {
+    for (const init of window.OdinModules) {
+      try { init(OdinContext); } catch (e) { console.error("Module init failed:", e); }
+    }
+  }
+
+  Nexus.emit("ODIN_STATE_READY", {});
+} catch (e) {
+  console.error("Odin module loader error:", e);
+}
 })();
