@@ -13,7 +13,7 @@
     const state = OdinContext.getState();
     const api = OdinContext.api;       // BaseModule._apiModule
     const logic = OdinContext.logic;   // OdinLogic
-    const nexus = OdinContext.nexus;   // Nexus bus if we want it
+    const nexus = OdinContext.nexus;
 
     const FREKI_VERSION = 'v1';
     const FIREBASE_ROOT =
@@ -22,7 +22,7 @@
     const Freki = {
       version: FREKI_VERSION,
       clientId: null,          // hashed client ID
-      myUserId: null,          // my actual Torn userId (not stored remotely)
+      myUserId: null,          // Torn userId (not stored remotely)
       myBuckets: {},           // this client's buckets (local aggregate)
       buckets: {},             // merged buckets from all clients
       lastAttackTs: 0,         // last processed attack timestamp
@@ -33,7 +33,7 @@
 
     // ---------- Small helpers ----------
 
-    // Lightweight non-crypto hash so we don't store raw IDs.
+    // Lightweight non-crypto hash so Freki doesnt  store raw IDs.
     function fnv1aHash(str) {
       let h = 0x811c9dc5;
       for (let i = 0; i < str.length; i++) {
@@ -69,7 +69,7 @@
     /**
      * KEY FORMAT:
      *   MyLevelBucket__OpponentLevelBucket__ChainBucket__WAR/PEACE
-     * This is now strictly "me vs opponent", regardless of whether I was
+     * This is now strictly "user vs opponent", regardless of whetherUser was
      * attacker or defender in the original attack.
      */
     function getBucketKey(myLevel, oppLevel, chainCount, isWar) {
@@ -149,7 +149,6 @@
         }
       }
 
-      // ---- FIX #5: Safe math (no division by zero) ----
       for (const key in merged) {
         const m = merged[key];
         const cnt = Number(m.count) || 0;
@@ -254,7 +253,7 @@
       try {
         if (!state.settings) state.settings = {};
 
-        // 1) Determine / create a client ID (hashed user ID)
+        // Determine / create a client ID (hashed user ID)
         let userId = getMyUserId();
 
         if (!userId) {
@@ -289,9 +288,6 @@
         Freki.myBuckets = state.settings.frekiBuckets || {};
         Freki.lastAttackTs = state.settings.frekiLastAttackTs || 0;
 
-        // ---- FIX #3: Duplicate ingestion guard ----
-        // If lastAttackTs somehow got reset (0) but we still have local buckets,
-        // that means state got out of sync and re-processing would double-count.
         if (!Freki.lastAttackTs && Freki.myBuckets && Object.keys(Freki.myBuckets).length > 0) {
           console.warn(
             '[FREKI] lastAttackTs was reset but buckets not empty. Clearing local Freki buckets to avoid double counting.'
@@ -302,7 +298,7 @@
           await state.saveToIDB();
         }
 
-        // 3) Immediately sync attacks once, then schedule periodic sync
+        // Immediately sync attacks once, then schedule periodic sync
         await Freki.syncAttacksToBuckets().catch((e) =>
           console.error('[FREKI] initial syncAttacksToBuckets error', e),
         );
@@ -355,7 +351,7 @@
       const myId = Freki.myUserId ? String(Freki.myUserId) : null;
       const myLevelFromState = getMyLevel();
 
-      // We'll treat very large "chain" values as IDs, not counts.
+      // Treat very large "chain" values as IDs, not counts.
       const MAX_REASONABLE_CHAIN = 120000;
 
       for (const [attackId, atk] of Object.entries(attacks)) {
@@ -375,7 +371,6 @@
           continue;
         }
 
-        // ---- FIX #4: Energy calculation (Retaliation = 0 E) ----
         let energy = 25;
         if (atk.modifiers && typeof atk.modifiers === 'object') {
           let isRetal = false;
@@ -422,9 +417,6 @@
           ''
         );
 
-        // ---- FIX #1: Perspective bug ----
-        // We want bucket key = MyLevel__OpponentLevel, *regardless* of
-        // whether I attacked them or they attacked me.
         let myLevel = myLevelFromState || null;
         let mySideLevel = null;
         let oppLevel = null;
@@ -433,16 +425,16 @@
         const iAmDefender = myId && defenderId && myId === defenderId;
 
         if (iAmAttacker && atkLevel && defLevel) {
-          // I attacked them
+          // user attacked them
           mySideLevel = atkLevel;
           oppLevel = defLevel;
         } else if (iAmDefender && atkLevel && defLevel) {
-          // They attacked me
+          // They attacked user
           mySideLevel = defLevel;
           oppLevel = atkLevel;
         } else if (!iAmAttacker && !iAmDefender && atkLevel && defLevel) {
-          // Fallback if we can't clearly identify my side via IDs.
-          // Try matching my known level to one of the sides.
+          // Fallback if Freki can't clearly identifyUsers side via IDs.
+          // Try matching users known level to one of the sides.
           if (myLevel && myLevel === atkLevel) {
             mySideLevel = atkLevel;
             oppLevel = defLevel;
@@ -452,18 +444,14 @@
           }
         }
 
-        // If we still don't know, give up on this attack (can't bucket meaningfully).
+        // If Freki still doesn't know, give up on this attack (can't bucket meaningfully).
         if (!mySideLevel || !oppLevel) {
           continue;
         }
 
-        // Ensure we have a "myLevel" for this session, even if we had to infer from logs.
+        // Ensure Freki have a "myLevel" for this session, even if it needs to infer from logs.
         if (!myLevel) myLevel = mySideLevel;
 
-        // ---- FIX #2: Chain ID vs Chain Count bug ----
-        // Torn attack logs often store chain as an ID, not the current chain hit.
-        // We try a few fields and apply a sanity check. If it's absurdly large,
-        // we treat it as an ID and default to 0 (no chain bucket).
         let chainCount = 0;
 
         const candidates = [
@@ -527,14 +515,6 @@
 
     // ---------- Public scoring API ----------
 
-    /**
-     * scoreTarget(target, opts?)
-     *   target: Odin target object { lvl, respectGain, ... }
-     *   opts: { attackerLevel?: number, chain?: number, war?: boolean }
-     *
-     * Score is essentially:
-     *   win_rate * avg_respect_per_energy
-     */
     Freki.scoreTarget = function scoreTarget(target, opts) {
       opts = opts || {};
       if (!target || !target.lvl) return 0;
@@ -553,14 +533,14 @@
       const b = Freki.buckets[key];
 
       if (!b || b.count < 5) {
-        // Not enough global data. Fall back to local respectGain if we have it.
+        // Not enough global data. Fall back to local respectGain if Freki has it.
         if (target.respectGain != null && target.respectGain > 0) {
           return target.respectGain / 25;
         }
         return 0;
       }
 
-      // Main "supermath" score: win rate * avg respect per energy
+      // Main score: win rate * avg respect per energy
       let score = (b.win_rate || 0) * (b.avg_rpe || 0);
 
       // Tiny tie-breaker from local respectGain if present
@@ -585,7 +565,111 @@
         .map((x) => x.t);
     };
 
-    // Expose globally so other modules (colonel, warcore, UI) can play with it
+    Freki.getBucketStats = function getBucketStats(attackerLevel, opponentLevel, chainCount, isWar) {
+      const key = getBucketKey(attackerLevel, opponentLevel, chainCount, isWar);
+      const b = Freki.buckets[key];
+      if (!b) return null;
+      return {
+        key,
+        count: b.count || 0,
+        win_count: b.win_count || 0,
+        loss_count: b.loss_count || 0,
+        total_respect: b.total_respect || 0,
+        total_energy: b.total_energy || 0,
+        avg_respect: b.avg_respect || 0,
+        avg_rpe: b.avg_rpe || 0,
+        win_rate: b.win_rate || 0,
+        last_ts: b.last_ts || 0,
+      };
+    };
+
+    Freki.getTargetScoreDetails = function getTargetScoreDetails(target, opts) {
+      opts = opts || {};
+      if (!target || !target.lvl) return null;
+
+      const attackerLevel =
+        opts.attackerLevel != null ? opts.attackerLevel : getMyLevel();
+      if (!attackerLevel) return null;
+
+      const chainCount =
+        opts.chain != null ? opts.chain : (logic && logic.chainCurrent) || 0;
+      const isWar = !!opts.war;
+
+      const key = getBucketKey(attackerLevel, target.lvl, chainCount, isWar);
+      const b = Freki.buckets[key];
+
+      // If there's no global data at all for this bucket
+      if (!b) {
+        const fallback =
+          target.respectGain != null && target.respectGain > 0
+            ? target.respectGain / 25
+            : 0;
+        return {
+          key,
+          score: fallback,
+          bucket: null,
+          source: 'local-only',
+          attackerLevel,
+          chainCount,
+          isWar,
+        };
+      }
+
+      // If Freki has some data but not enough to fully trust
+      if (b.count < 5) {
+        const fallback =
+          target.respectGain != null && target.respectGain > 0
+            ? target.respectGain / 25
+            : 0;
+        return {
+          key,
+          score: fallback,
+          bucket: {
+            count: b.count,
+            win_count: b.win_count,
+            loss_count: b.loss_count,
+            total_respect: b.total_respect,
+            total_energy: b.total_energy,
+            avg_respect: b.avg_respect,
+            avg_rpe: b.avg_rpe,
+            win_rate: b.win_rate,
+            last_ts: b.last_ts,
+          },
+          source: 'global-insufficient',
+          attackerLevel,
+          chainCount,
+          isWar,
+        };
+      }
+
+      // Normal case – full Freki score
+      let score = (b.win_rate || 0) * (b.avg_rpe || 0);
+
+      // Tiny bias with local respect if present
+      if (target.respectGain != null && target.respectGain > 0) {
+        score += target.respectGain / 10000;
+      }
+
+      return {
+        key,
+        score,
+        bucket: {
+          count: b.count,
+          win_count: b.win_count,
+          loss_count: b.loss_count,
+          total_respect: b.total_respect,
+          total_energy: b.total_energy,
+          avg_respect: b.avg_respect,
+          avg_rpe: b.avg_rpe,
+          win_rate: b.win_rate,
+          last_ts: b.last_ts,
+        },
+        source: 'global',
+        attackerLevel,
+        chainCount,
+        isWar,
+      };
+    };
     window.Freki = Freki;
 
     // Kick it off
