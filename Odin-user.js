@@ -15,7 +15,7 @@
 // @connect      worldtimeapi.org
 // @connect      torn-war-room-default-rtdb.firebaseio.com
 // @connect      torn-war-room.firebasestorage.app
-// @require      https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/main/modules/freki.js
+// @require      https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/main/modules/colonel.js
 // @require      https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/main/modules/odin-warcore.js
 // @require      https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/main/modules/odin-ui.js
 // ==/UserScript==
@@ -883,6 +883,55 @@ styleElement.textContent = `
     border-radius: 0;
     object-fit: contain;
   }
+  .freki-score-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 11px;
+  }
+  .freki-score-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .freki-score-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 34px;
+    padding: 2px 6px;
+    border-radius: 999px;
+    font-weight: 700;
+    font-size: 11px;
+    background: #333;
+    color: #fff;
+  }
+  .freki-score-meta {
+    opacity: 0.8;
+    white-space: nowrap;
+  }
+  .freki-score-bar {
+    position: relative;
+    width: 100%;
+    height: 4px;
+    border-radius: 999px;
+    background: #262626;
+    overflow: hidden;
+  }
+  .freki-score-bar-fill {
+    height: 100%;
+    border-radius: 999px;
+    transition: width 0.3s ease;
+  }
+  .freki-score-na {
+    opacity: 0.4;
+  }
+  .freki-tier-s { background: linear-gradient(90deg,#ffd700,#ffa000); }
+  .freki-tier-a { background: linear-gradient(90deg,#4caf50,#2e7d32); }
+  .freki-tier-b { background: linear-gradient(90deg,#2196f3,#1976d2); }
+  .freki-tier-c { background: linear-gradient(90deg,#9c27b0,#6a1b9a); }
+  .freki-tier-d { background: linear-gradient(90deg,#616161,#424242); }
+  .freki-tier-local { background: linear-gradient(90deg,#607d8b,#455a64); }
 `;
 document.head.appendChild(styleElement);
 
@@ -3328,6 +3377,8 @@ class OdinUserInterface extends BaseModule {
     const prefix = isWar ? 'war-' : '';
     const title = isWar ? 'War Targets' : 'Targets';
     const now = this.logic.getServerNow();
+
+    // same priority logic as before
     const sortedTargets = [...targets].sort((a, b) => {
       function getPriority(t) {
         const timer = Math.max(0, t.status_until - now);
@@ -3347,7 +3398,27 @@ class OdinUserInterface extends BaseModule {
       const pb = getPriority(b);
       return pa.group - pb.group || pa.value - pb.value;
     });
-    const addButtonImg = isWar ? '<img src="https://i.ibb.co/SwSSQpR7/Screenshot-20251108-234119-Google-2.png" alt="Add War Target" style="width: auto; height: 20px;">' : '<img src="https://i.ibb.co/bgM3FHBV/Screenshot-20251108-233856-Google-2.png" alt="Add Target" style="width: auto; height: 20px;">';
+
+    // enrich with Freki scoring info if available
+    const enhanced = sortedTargets.map(t => {
+      let details = null;
+      if (window.Freki && typeof window.Freki.getTargetScoreDetails === 'function') {
+        try {
+          details = window.Freki.getTargetScoreDetails(t, {
+            chain: this.logic.chainCurrent || 0,
+            war: isWar
+          });
+        } catch (e) {
+          console.error('[ODIN] Freki score error', e);
+        }
+      }
+      return { target: t, freki: details };
+    });
+
+    const addButtonImg = isWar
+      ? '<img src="https://i.ibb.co/SwSSQpR7/Screenshot-20251108-234119-Google-2.png" alt="Add War Target" style="width:auto;height:20px;">'
+      : '<img src="https://i.ibb.co/bgM3FHBV/Screenshot-20251108-233856-Google-2.png" alt="Add Target" style="width:auto;height:20px;">';
+
     return `
 <div class="button-group small-button-group">
   <button id="refresh-${prefix}targets">Refresh ${title}</button>
@@ -3357,7 +3428,7 @@ class OdinUserInterface extends BaseModule {
 <input type="file" id="import-${prefix}file" accept=".json" style="display:none;">
 <div class="add-form">
   <input type="text" id="add-${prefix}target-id" placeholder="Enter ${title} ID">
-  <button id="add-${prefix}target-btn" style="margin-left: 5px;">${addButtonImg}</button>
+  <button id="add-${prefix}target-btn" style="margin-left:5px;">${addButtonImg}</button>
 </div>
 <p>Note: Respect from last 100 attacks only.</p>
 <div class="table-container">
@@ -3371,49 +3442,113 @@ class OdinUserInterface extends BaseModule {
         <th data-col="status">Status</th>
         <th data-col="lastAction">Last Action</th>
         <th data-col="respectGain">Respect</th>
+        <th data-col="score">Score</th>
         <th data-col="lastUpdate">Last Update</th>
         <th>Action</th>
       </tr>
     </thead>
     <tbody>
-      ${sortedTargets.map(t => {
+      ${enhanced.map(({target: t, freki}) => {
         const totalSeconds = Math.floor((Date.now() - t.lastUpdate) / 1000);
         const minutes = Math.floor(totalSeconds / 60);
         const seconds = totalSeconds % 60;
-        const timeAgo = `${minutes < 10 ? '0' : ''}${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
-        const factionLink = t.faction_id && t.faction !== 'N/A' ? `<a href="https://www.torn.com/factions.php?step=profile&ID=${t.faction_id}">${Utils.escapeHtml(t.faction)}</a>` : (Utils.escapeHtml(t.faction) || 'N/A');
-        const respectDisplay = t.respectGain !== null ? t.respectGain : 'N/A';
+        const timeAgo =
+          (minutes < 10 ? '0' : '') + minutes + ':' +
+          (seconds < 10 ? '0' : '') + seconds;
+
+        const factionLink =
+          t.faction_id && t.faction !== 'N/A'
+            ? `<a href="https://www.torn.com/factions.php?step=profile&ID=${t.faction_id}">${Utils.escapeHtml(t.faction)}</a>`
+            : (Utils.escapeHtml(t.faction) || 'N/A');
+
+        const respectDisplay =
+          t.respectGain != null ? t.respectGain : 'N/A';
+
         let statusDisplay = Utils.escapeHtml(t.status);
         let attackButton = '';
+
         if (t.status === 'Okay') {
           attackButton = `<button class="attack-btn" data-id="${t.id}">Attack</button>`;
         }
+
         if (t.status === 'Hospital' || t.status === 'Jail' || t.status === 'Traveling') {
-          let timer = t.status_until - now;
+          const timer = t.status_until - now;
           if (timer > 0) {
-            statusDisplay += ` (<span class="countdown" data-until="${t.status_until}">${Utils.formatTime(timer, true)}</span>)`;
+            statusDisplay +=
+              ' (<span class="countdown" data-until="' + t.status_until + '">' +
+              Utils.formatTime(timer, true) +
+              '</span>)';
           }
         } else if (t.status_description) {
-          statusDisplay += ` - ${Utils.escapeHtml(t.status_description)}`;
+          statusDisplay += ' - ' + Utils.escapeHtml(t.status_description);
         }
-        return `<tr data-id="${t.id}">
-          <td data-label="NAME"><a href="https://www.torn.com/profiles.php?XID=${t.id}">${Utils.escapeHtml(t.name || 'Unidentified')}</a></td>
-          <td data-label="LEVEL">[${t.lvl || 'N/A'}]</td>
-          <td data-label="Faction">${factionLink}</td>
-          <td data-label="Life">${t.life || 'N/A'}</td>
-          <td data-label="Status">${statusDisplay} ${attackButton}</td>
-          <td data-label="Last Action">${Utils.escapeHtml(t.lastAction || 'N/A')}</td>
-          <td data-label="Respect">${respectDisplay}</td>
-          <td data-label="Last Update">${timeAgo}</td>
-          <td data-label="Action"><button class="remove-${prefix}target" data-id="${t.id}">Remove</button></td>
-        </tr>`;
+
+        // ---------- Freki pretty score cell ----------
+        let scoreHtml = '<span class="freki-score-na">—</span>';
+        let scoreText = '';
+        if (freki && freki.bucket && freki.bucket.count >= 5) {
+          const score = Number(freki.score || 0);
+          const rpe = Number(freki.bucket.avg_rpe || 0);
+          const wr  = Number(freki.bucket.win_rate || 0);
+          const n   = Number(freki.bucket.count || 0);
+
+          const barWidth = Math.max(5, Math.min(100, Math.round((score / 3) * 100)));
+
+          let tier = 'freki-tier-d';
+          if (score >= 2.5) tier = 'freki-tier-s';
+          else if (score >= 2.0) tier = 'freki-tier-a';
+          else if (score >= 1.5) tier = 'freki-tier-b';
+          else if (score >= 1.0) tier = 'freki-tier-c';
+
+          scoreText = score.toFixed(2);
+
+          scoreHtml = `
+            <div class="freki-score-wrap">
+              <div class="freki-score-head">
+                <span class="freki-score-badge ${tier}">${score.toFixed(2)}</span>
+                <span class="freki-score-meta">
+                  WR ${(wr * 100).toFixed(0)}% · RPE ${rpe.toFixed(2)} · n=${n}
+                </span>
+              </div>
+              <div class="freki-score-bar">
+                <div class="freki-score-bar-fill ${tier}" style="width:${barWidth}%;"></div>
+              </div>
+            </div>`;
+        } else if (t.respectGain != null && t.respectGain > 0) {
+          const fallback = t.respectGain / 25;
+          scoreText = fallback.toFixed(2);
+          scoreHtml = `
+            <div class="freki-score-wrap">
+              <div class="freki-score-head">
+                <span class="freki-score-badge freki-tier-local">${fallback.toFixed(2)}</span>
+                <span class="freki-score-meta">local · ${t.respectGain.toFixed ? t.respectGain.toFixed(2) : t.respectGain} respect</span>
+              </div>
+            </div>`;
+        }
+
+        return `
+          <tr data-id="${t.id}">
+            <td data-label="NAME">
+              <a href="https://www.torn.com/profiles.php?XID=${t.id}">
+                ${Utils.escapeHtml(t.name || 'Unidentified')}
+              </a>
+            </td>
+            <td data-label="LEVEL">[${t.lvl || 'N/A'}]</td>
+            <td data-label="Faction">${factionLink}</td>
+            <td data-label="Life">${t.life || 'N/A'}</td>
+            <td data-label="Status">${statusDisplay} ${attackButton}</td>
+            <td data-label="Last Action">${Utils.escapeHtml(t.lastAction || 'N/A')}</td>
+            <td data-label="Respect">${respectDisplay}</td>
+            <td data-label="Score">${scoreHtml}</td>
+            <td data-label="Last Update">${timeAgo}</td>
+            <td data-label="Action"><button class="remove-${prefix}target" data-id="${t.id}">Remove</button></td>
+          </tr>`;
       }).join('')}
     </tbody>
   </table>
 </div>
 `;
   }
-
   renderMembersList() {
     const now = this.logic.getServerNow();
     return `
@@ -3766,7 +3901,13 @@ ${Object.keys(this.state.enemyFactions).length === 0 ? '<p>No enemy factions add
         const bStatus = b.querySelector('.status-icon').classList[1];
         aVal = getStatusValue(aStatus, mode);
         bVal = getStatusValue(bStatus, mode);
-      } else if (col === 'lvl' || col === 'level' || col === 'days_in_faction' || col === 'respectGain') {
+      } else if (
+      col === 'lvl' ||
+      col === 'level' ||
+      col === 'days_in_faction' ||
+      col === 'respectGain' ||
+      col === 'score'
+    ) {
         aVal = parseFloat(aText) || 0;
         bVal = parseFloat(bText) || 0;
       } else if (col === 'life') {
