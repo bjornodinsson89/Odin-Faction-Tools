@@ -1,12 +1,6 @@
 // odins-spear-core.js
-// Odin’s Spear – War Claims / Med Deals / Faction Notes / Watchers / Freki Bridge
 // Headless core engine
-//
-// Exposed via:
-//   window.OdinsSpear
-//   OdinContext.odinsSpear
-//
-// Emits events on OdinContext.nexus (see CONFIG.EVENTS).
+////////////////////////
 
 (function () {
   'use strict';
@@ -19,9 +13,9 @@
     const nexus = OdinContext.nexus;
     const logic = OdinContext.logic || null;
 
-    // ---------------------------------------------------------------------------
+    // ----------------------------
     // CONFIG
-    // ---------------------------------------------------------------------------
+    // ----------------------------
 
     const SPEAR_VERSION = '1.0.0-odin';
 
@@ -32,14 +26,13 @@
       API_GET_URL: 'https://torn-war-room-backend-559747349324.us-central1.run.app/spear/api',
       API_POST_URL: 'https://torn-war-room-backend-559747349324.us-central1.run.app/spear/api',
 
-      // Bundle endpoint (claims + notes + warConfig)
+      // Bundle endpoint (claims + notes + warConfig + chain watchers)
       API_BUNDLE_URL: 'https://torn-war-room-backend-559747349324.us-central1.run.app/spear/bundle',
 
-      // Firebase-style auth
       FIREBASE: {
-      projectId: 'torn-war-room',
-      apiKey: 'AIzaSyAXIP665pJj4g9L9i-G-XVBrcJ0e5V4uw',
-      customTokenUrl: 'https://torn-war-room-backend-559747349324.us-central1.run.app/auth/issueauthtoken',
+        projectId: 'torn-war-room',
+        apiKey: 'AIzaSyAXIP665pJj4g9L9i-G-XVBrcJ0e5V4uw',
+        customTokenUrl: 'https://torn-war-room-backend-559747349324.us-central1.run.app/auth/issueauthtoken',
       },
 
       REFRESH: {
@@ -60,7 +53,8 @@
         LOCAL_CLAIMS_KEY: 'spear.localClaims',
         LOCAL_NOTES_KEY: 'spear.localNotes',
         LOCAL_WAR_KEY: 'spear.localWarConfig',
-        WATCHERS_KEY: 'spear.watchers',
+        WATCHERS_KEY: 'spear.watchers',          // active chain watchers
+        WATCHERS_LOG_KEY: 'spear.watchersLog',   // chain watcher session history
       },
 
       LIMITS: {
@@ -86,8 +80,13 @@
         NOTES_INIT: 'SPEAR_NOTES_INIT',
         NOTES_UPDATED: 'SPEAR_NOTES_UPDATED',
 
+        // Chain watcher state (active “green lights”)
         WATCHERS_INIT: 'SPEAR_WATCHERS_INIT',
         WATCHERS_UPDATED: 'SPEAR_WATCHERS_UPDATED',
+
+        // Chain watcher session log (for leadership export / auditing)
+        WATCHERS_LOG_INIT: 'SPEAR_WATCHERS_LOG_INIT',
+        WATCHERS_LOG_UPDATED: 'SPEAR_WATCHERS_LOG_UPDATED',
       },
     };
 
@@ -167,7 +166,6 @@
       return null;
     }
 
-    // Settings namespaced under state.settings.odinsSpear
     const SettingsStore = {
       ensureRoot() {
         state.settings = state.settings || {};
@@ -271,9 +269,9 @@
       return safeJsonParse(text, {});
     }
 
-    // ---------------------------------------------------------------------------
-    // AUTH LAYER (Firebase-style, custom token from backend)
-    // ---------------------------------------------------------------------------
+    // ----------------------------
+    // AUTH LAYER 
+    // ----------------------------
 
     const FirebaseAuth = (() => {
       const SESSION_KEY = CONFIG.STORAGE.SESSION_KEY;
@@ -464,9 +462,9 @@
       };
     })();
 
-    // ---------------------------------------------------------------------------
-    // API CLIENT (actions + bundle)
-    // ---------------------------------------------------------------------------
+    // ------------------------
+    // API CLIENT 
+    // ------------------------
 
     const ApiClient = {
       async call(action, payload, opts = {}) {
@@ -502,7 +500,13 @@
         return json && typeof json.result !== 'undefined' ? json.result : json;
       },
 
-      async fetchBundle({ minClaimsTs, minWarTs, minNotesTs } = {}) {
+      async fetchBundle({
+        minClaimsTs,
+        minWarTs,
+        minNotesTs,
+        minWatchersTs,
+        minWatchersLogTs,
+      } = {}) {
         const tornId = getUserId();
         const factionId = getFactionId();
         const idToken = await FirebaseAuth.ensureIdToken({ allowAutoSignIn: true });
@@ -512,10 +516,13 @@
           tornId,
           factionId,
           clientTime: Math.floor(nowMs() / 1000),
+          // All timestamps are ms since epoch (client view)
           timestamps: {
             claims: minClaimsTs || null,
             war: minWarTs || null,
             notes: minNotesTs || null,
+            watchers: minWatchersTs || null,
+            watchersLog: minWatchersLogTs || null,
           },
         };
 
@@ -572,11 +579,19 @@
           { method: 'POST' }
         );
       },
+
+      async setChainWatchStatus(isOn, meta) {
+        return this.call(
+          'chainWatch.setStatus',
+          { isOn: !!isOn, meta: meta || {} },
+          { method: 'POST' }
+        );
+      },
     };
 
-    // ---------------------------------------------------------------------------
+    // ------------------------
     // CORE STATE
-    // ---------------------------------------------------------------------------
+    // ------------------------
 
     const OdinsSpear = {
       version: CONFIG.VERSION,
@@ -589,16 +604,20 @@
       lastWarUpdate: 0,
       lastNotesUpdate: 0,
 
-      watchers: [],
+      watchers: [], 
+      watchersLog: [],
+
+      lastWatchersUpdate: 0,
+      lastWatchersLogUpdate: 0,
 
       ready: false,
       _syncTimer: null,
       _activityTrackingAttached: false,
     };
 
-    // ---------------------------------------------------------------------------
+    // --------------------------
     // NORMALISERS
-    // ---------------------------------------------------------------------------
+    // --------------------------
 
     function normalizeClaim(raw) {
       if (!raw) return null;
@@ -689,6 +708,48 @@
       };
     }
 
+    function normalizeWatcher(raw) {
+      if (!raw) return null;
+      const now = nowMs();
+      const id = String(raw.id || raw.playerId || raw.tornId || '');
+      if (!id) return null;
+
+      const startedAt = Number(
+        raw.startedAt ||
+          raw.startTime ||
+          raw.started_at ||
+          raw.createdAt ||
+          raw.created_at ||
+          now
+      ) || now;
+
+      const endedRaw =
+        raw.endedAt !== undefined
+          ? raw.endedAt
+          : raw.endTime !== undefined
+          ? raw.endTime
+          : raw.ended_at !== undefined
+          ? raw.ended_at
+          : null;
+      const endedAt = endedRaw == null ? null : (Number(endedRaw) || null);
+
+      const updatedAt = Number(
+        raw.updatedAt ||
+          raw.updated_at ||
+          (endedAt != null ? endedAt : startedAt) ||
+          now
+      ) || now;
+
+      return {
+        id,
+        name: raw.name || raw.playerName || null,
+        factionId: raw.factionId ? String(raw.factionId) : null,
+        startedAt,
+        endedAt,
+        updatedAt,
+      };
+    }
+
     // ---------------------------------------------------------------------------
     // LOCAL PERSISTENCE
     // ---------------------------------------------------------------------------
@@ -744,14 +805,9 @@
         const list = Array.isArray(raw) ? raw : safeJsonParse(raw, []);
         const out = [];
         for (const w of list) {
-          if (!w) continue;
-          const id = String(w.id || w.playerId || w.tornId || w);
-          if (!id) continue;
-          out.push({
-            id,
-            name: w.name || w.playerName || null,
-          });
-          if (out.length >= CONFIG.LIMITS.MAX_WATCHERS) break;
+          const n = normalizeWatcher(w);
+          if (!n) continue;
+          if (n.endedAt == null) out.push(n);
         }
         return out;
       },
@@ -760,11 +816,28 @@
           SettingsStore.set(CONFIG.STORAGE.WATCHERS_KEY, list || []);
         } catch (_) {}
       },
+
+      loadWatchersLog() {
+        const raw = SettingsStore.get(CONFIG.STORAGE.WATCHERS_LOG_KEY, null);
+        const list = Array.isArray(raw) ? raw : safeJsonParse(raw, []);
+        const out = [];
+        for (const w of list) {
+          const n = normalizeWatcher(w);
+          if (!n) continue;
+          out.push(n);
+        }
+        return out;
+      },
+      saveWatchersLog(list) {
+        try {
+          SettingsStore.set(CONFIG.STORAGE.WATCHERS_LOG_KEY, list || []);
+        } catch (_) {}
+      },
     };
 
-    // ---------------------------------------------------------------------------
+    // ------------------------
     // EVENTS
-    // ---------------------------------------------------------------------------
+    // ------------------------
 
     function emit(eventName, payload) {
       try {
@@ -776,9 +849,9 @@
       }
     }
 
-    // ---------------------------------------------------------------------------
+    // -----------------------------
     // CORE MUTATORS
-    // ---------------------------------------------------------------------------
+    // -----------------------------
 
     function setClaims(next, meta) {
       if (!Array.isArray(next)) next = [];
@@ -821,17 +894,31 @@
       });
     }
 
-    function setWatchers(list) {
-      OdinsSpear.watchers = list || [];
+    function setWatchers(list, meta) {
+      const normalized = (list || []).map(normalizeWatcher).filter(Boolean);
+      OdinsSpear.watchers = normalized.filter((w) => w.endedAt == null);
       LocalCache.saveWatchers(OdinsSpear.watchers);
+      OdinsSpear.lastWatchersUpdate = nowMs();
       emit(CONFIG.EVENTS.WATCHERS_UPDATED, {
         watchers: OdinsSpear.watchers,
+        meta: meta || {},
       });
     }
 
-    // ---------------------------------------------------------------------------
+    function setWatchersLog(list, meta) {
+      const normalized = (list || []).map(normalizeWatcher).filter(Boolean);
+      OdinsSpear.watchersLog = normalized.slice();
+      LocalCache.saveWatchersLog(OdinsSpear.watchersLog);
+      OdinsSpear.lastWatchersLogUpdate = nowMs();
+      emit(CONFIG.EVENTS.WATCHERS_LOG_UPDATED, {
+        watchersLog: OdinsSpear.watchersLog,
+        meta: meta || {},
+      });
+    }
+
+    // -----------------------------------
     // CLAIMS SERVICE
-    // ---------------------------------------------------------------------------
+    // ------------------------------------
 
     const ClaimsService = {
       getAll() {
@@ -1109,9 +1196,9 @@
       },
     };
 
-    // ---------------------------------------------------------------------------
+    // ---------------------------------
     // NOTES SERVICE
-    // ---------------------------------------------------------------------------
+    // ---------------------------------
 
     const NotesService = {
       get(playerId) {
@@ -1178,9 +1265,9 @@
       },
     };
 
-    // ---------------------------------------------------------------------------
+    // -----------------------------------
     // WAR CONFIG SERVICE
-    // ---------------------------------------------------------------------------
+    // -----------------------------------
 
     const WarService = {
       getConfig() {
@@ -1202,50 +1289,141 @@
       },
     };
 
-    // ---------------------------------------------------------------------------
-    // WATCHERS SERVICE
-    // ---------------------------------------------------------------------------
+    // ----------------------------------------------------------
+    // CHAIN WATCHER SERVICE (green-light toggle + session log)
+    // ----------------------------------------------------------
 
     const WatchersService = {
+      // Active watchers (green lights)
+      getActive() {
+        return (OdinsSpear.watchers || [])
+          .slice()
+          .sort((a, b) => (a.startedAt || 0) - (b.startedAt || 0));
+      },
+
       getAll() {
-        return OdinsSpear.watchers.slice();
+        return this.getActive();
       },
 
-      add({ id, name }) {
-        id = String(id || '');
-        if (!id) return;
-        const exists = OdinsSpear.watchers.find((w) => w.id === id);
-        if (exists) return;
-        const list = OdinsSpear.watchers.slice();
-        if (list.length >= CONFIG.LIMITS.MAX_WATCHERS) {
-          list.shift();
+      // Historical sessions (for leadership)
+      getLog() {
+        return (OdinsSpear.watchersLog || [])
+          .slice()
+          .sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
+      },
+
+      // Is the current user actively on chain watch?
+      isMeActive() {
+        const me = String(getUserId() || '');
+        if (!me) return false;
+        return (OdinsSpear.watchers || []).some(
+          (w) => w.id === me && (w.endedAt == null)
+        );
+      },
+
+      // All my sessions (including active + history)
+      getMySessions() {
+        const me = String(getUserId() || '');
+        if (!me) return [];
+        const combined = []
+          .concat(OdinsSpear.watchers || [])
+          .concat(OdinsSpear.watchersLog || []);
+        return combined.filter((w) => w.id === me);
+      },
+
+      // Core toggle, used by UI: flips the green light for the current user.
+      async setStatus(isOn, meta = {}) {
+        const me = String(getUserId() || '');
+        if (!me) throw new Error('Not signed in; cannot toggle chain watch.');
+
+        const now = nowMs();
+        const currentlyOn = this.isMeActive();
+        isOn = !!isOn;
+
+        // No-op if state already matches requested value
+        if (isOn === currentlyOn) {
+          return {
+            watchers: this.getActive(),
+            watchersLog: this.getLog(),
+          };
         }
-        list.push({ id, name: name || null });
-        setWatchers(list);
-      },
 
-      remove(id) {
-        id = String(id || '');
-        if (!id) return;
-        const list = OdinsSpear.watchers.filter((w) => w.id !== id);
-        setWatchers(list);
-      },
+        const currentActive = OdinsSpear.watchers || [];
+        const currentLog = OdinsSpear.watchersLog || [];
 
-      toggle({ id, name }) {
-        id = String(id || '');
-        if (!id) return;
-        const exists = OdinsSpear.watchers.find((w) => w.id === id);
-        if (exists) {
-          WatchersService.remove(id);
+        let nextActive = currentActive.slice();
+        let nextLog = currentLog.slice();
+
+        if (isOn) {
+          // Start a new chain watch session for user
+          const myName = logic && logic.user && logic.user.name;
+          const factionId = getFactionId();
+          // Drop any stale active entries formuser
+          nextActive = nextActive.filter((w) => w.id !== me);
+          nextActive.push({
+            id: me,
+            name: myName || null,
+            factionId: factionId ? String(factionId) : null,
+            startedAt: now,
+            endedAt: null,
+            updatedAt: now,
+          });
         } else {
-          WatchersService.add({ id, name });
+          // Stop users active session and push it into the log
+          const remainingActive = [];
+          let closedSession = null;
+          for (const w of nextActive) {
+            if (!closedSession && w.id === me && w.endedAt == null) {
+              closedSession = {
+                ...w,
+                endedAt: now,
+                updatedAt: now,
+              };
+            } else {
+              remainingActive.push(w);
+            }
+          }
+          nextActive = remainingActive;
+          if (closedSession) {
+            nextLog = nextLog.concat(closedSession);
+          }
         }
+
+        setWatchers(nextActive, { source: 'local-chain-watch', meta, isOn });
+        setWatchersLog(nextLog, { source: 'local-chain-watch', meta, isOn });
+
+        try {
+          const result = await ApiClient.setChainWatchStatus(isOn, meta);
+          if (result) {
+            if (Array.isArray(result.watchers)) {
+              setWatchers(result.watchers, { source: 'server-ack', isOn });
+            }
+            if (Array.isArray(result.watchersLog)) {
+              setWatchersLog(result.watchersLog, { source: 'server-ack', isOn });
+            }
+          }
+        } catch (e) {
+          log('setChainWatchStatus error', e);
+        }
+
+        return {
+          watchers: this.getActive(),
+          watchersLog: this.getLog(),
+        };
+      },
+
+      async start(meta = {}) {
+        return this.setStatus(true, meta);
+      },
+
+      async stop(meta = {}) {
+        return this.setStatus(false, meta);
       },
     };
 
-    // ---------------------------------------------------------------------------
+    // -----------------------------
     // RETALIATION HELPER
-    // ---------------------------------------------------------------------------
+    // ----------------------------
 
     const RetalService = {
       getRetalCandidates({ windowSeconds = 24 * 60 * 60 } = {}) {
@@ -1287,9 +1465,9 @@
       },
     };
 
-    // ---------------------------------------------------------------------------
+    // ----------------------------
     // FREKI BRIDGE
-    // ---------------------------------------------------------------------------
+    // ---------------------------
 
     const FrekiBridge = {
       isAvailable() {
@@ -1346,20 +1524,24 @@
       },
     };
 
-    // ---------------------------------------------------------------------------
+    // ----------------------------------------
     // SYNC LOOP (bundle pull, activity-aware)
-    // ---------------------------------------------------------------------------
+    // ----------------------------------------
 
     async function syncBundleOnce(reason) {
       try {
         const minClaimsTs = OdinsSpear.lastClaimsUpdate || 0;
         const minWarTs = OdinsSpear.lastWarUpdate || 0;
         const minNotesTs = OdinsSpear.lastNotesUpdate || 0;
+        const minWatchersTs = OdinsSpear.lastWatchersUpdate || 0;
+        const minWatchersLogTs = OdinsSpear.lastWatchersLogUpdate || 0;
 
         const result = await ApiClient.fetchBundle({
           minClaimsTs,
           minWarTs,
           minNotesTs,
+          minWatchersTs,
+          minWatchersLogTs,
         });
 
         if (result.claims && Array.isArray(result.claims)) {
@@ -1381,6 +1563,14 @@
             if (n) map[pid] = n;
           });
           setNotes(map, { source: 'bundle', reason });
+        }
+
+        if (Array.isArray(result.watchers)) {
+          setWatchers(result.watchers, { source: 'bundle', reason });
+        }
+
+        if (Array.isArray(result.watchersLog)) {
+          setWatchersLog(result.watchersLog, { source: 'bundle', reason });
         }
       } catch (e) {
         log('syncBundleOnce error', e);
@@ -1425,9 +1615,9 @@
       }, activeMs);
     }
 
-    // ---------------------------------------------------------------------------
+    // ---------------------------
     // INIT
-    // ---------------------------------------------------------------------------
+    // ---------------------------
 
     (function init() {
       try {
@@ -1435,11 +1625,13 @@
         OdinsSpear.notesById = LocalCache.loadNotes();
         OdinsSpear.warConfig = LocalCache.loadWarConfig();
         OdinsSpear.watchers = LocalCache.loadWatchers();
+        OdinsSpear.watchersLog = LocalCache.loadWatchersLog();
 
         emit(CONFIG.EVENTS.CLAIMS_INIT, { claims: OdinsSpear.claims });
         emit(CONFIG.EVENTS.NOTES_INIT, { notesById: OdinsSpear.notesById });
         emit(CONFIG.EVENTS.WAR_INIT, { warConfig: OdinsSpear.warConfig });
         emit(CONFIG.EVENTS.WATCHERS_INIT, { watchers: OdinsSpear.watchers });
+        emit(CONFIG.EVENTS.WATCHERS_LOG_INIT, { watchersLog: OdinsSpear.watchersLog });
 
         syncBundleOnce('boot');
         attachActivityTracking();
@@ -1452,9 +1644,9 @@
       }
     })();
 
-    // ---------------------------------------------------------------------------
+    // -------------------------
     // PUBLIC API
-    // ---------------------------------------------------------------------------
+    // -------------------------
 
     OdinsSpear.api = ApiClient;
     OdinsSpear.auth = FirebaseAuth;
