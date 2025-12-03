@@ -37,10 +37,10 @@
 
       // Firebase-style auth
       FIREBASE: {
-        projectId: 'tornuserstracker',
-        apiKey: 'AIzaSyDScnXHu4Q7r696LSuK64dhUSlX_EvxpZY',
-        customTokenUrl: 'https://issueauthtoken-codod64xdq-uc.a.run.app',
-      },
++        projectId: 'torn-war-room',
++        apiKey: 'AIzaSyAXIP665pJj4g9L9i-G-XVBrcJ0e5V4uw',
++        customTokenUrl: 'https://issueauthtoken-codod64xdq-uc.a.run.app',
++      },
 
       REFRESH: {
         ACTIVE_MS: 10_000,
