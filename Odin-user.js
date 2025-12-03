@@ -15,9 +15,7 @@
 // @connect      worldtimeapi.org
 // @connect      torn-war-room-default-rtdb.firebaseio.com
 // @connect      torn-war-room.firebasestorage.app
-// @require      https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/main/modules/colonel.js
-// @require      https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/main/modules/odin-warcore.js
-// @require      https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/main/modules/odin-ui.js
+// @require      https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/main/modules/freki.js
 // ==/UserScript==
 
 'use strict';
