@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Odin Tools
 // @namespace    http://tampermonkey.net/
-// @version      2.0
+// @version      2.1
 // @description  Faction Tools
 // @author       BjornOdinsson89
 // @match        https://www.torn.com/*
@@ -2124,22 +2124,25 @@ class OdinLogic extends BaseModule {
   async watchChain(isFast = false) {
     if (!this.isPageVisible) return;
     try {
-      const json = await this.api('/faction?selections=chain', 0);
-      if (!json.error && json.chain) {
-        const prevCurrent = this.chainCurrent;
-        this.chainCurrent = json.chain.current || 0;
-        this.chainMax = json.chain.max || 0;
-        this.chainTimeout = json.chain.timeout || 0;
-        this.checkChainBonuses(prevCurrent);
-      } else {
-        console.error('Chain API error:', json?.error);
-        OdinState.logError(new Error('Chain API error: ' + JSON.stringify(json?.error)));
-        this.chainCurrent = 0;
-        this.chainMax = 0;
-        this.chainTimeout = 0;
-        this.nearBonusTriggered20 = false;
-        this.nearBonusTriggered10 = false;
-        this.triggeredBonuses.clear();
+      const json = await this.api('/user?selections=bars', 0);
+      if (!json.error && json.bars && json.bars.chain) {
+      const prevCurrent = this.chainCurrent ?? 0;
+      const chain = json.bars.chain;
+
+      this.chainCurrent = chain.current || 0;
+      this.chainMax = chain.max || 0;
+      this.chainTimeout = chain.timeout || 0;
+
+      this.checkChainBonuses(prevCurrent);
+    } else {
+      console.error('Bars/chain API error:', json?.error);
+      OdinState.logError(new Error('Bars/chain API error: ' + JSON.stringify(json?.error)));
+      this.chainCurrent = 0;
+      this.chainMax = 0;
+      this.chainTimeout = 0;
+      this.nearBonusTriggered20 = false;
+      this.nearBonusTriggered10 = false;
+      this.triggeredBonuses.clear();
       }
     } catch (e) {
       console.error('Chain fetch error:', e);
