@@ -29,18 +29,18 @@
       VERSION: SPEAR_VERSION,
 
       // Backend HTTP gateways
-      API_GET_URL: 'https://apiget-codod64xdq-uc.a.run.app',
-      API_POST_URL: 'https://apipost-codod64xdq-uc.a.run.app',
+      API_GET_URL: 'https://torn-war-room-backend-559747349324.us-central1.run.app/spear/api',
+      API_POST_URL: 'https://torn-war-room-backend-559747349324.us-central1.run.app/spear/api',
 
       // Bundle endpoint (claims + notes + warConfig)
-      API_BUNDLE_URL: 'https://getglobaldata-codod64xdq-uc.a.run.app',
+      API_BUNDLE_URL: 'https://torn-war-room-backend-559747349324.us-central1.run.app/spear/bundle',
 
       // Firebase-style auth
       FIREBASE: {
-+        projectId: 'torn-war-room',
-+        apiKey: 'AIzaSyAXIP665pJj4g9L9i-G-XVBrcJ0e5V4uw',
-+        customTokenUrl: 'https://issueauthtoken-codod64xdq-uc.a.run.app',
-+      },
+      projectId: 'torn-war-room',
+      apiKey: 'AIzaSyAXIP665pJj4g9L9i-G-XVBrcJ0e5V4uw',
+      customTokenUrl: 'https://torn-war-room-backend-559747349324.us-central1.run.app/auth/issueauthtoken',
+      },
 
       REFRESH: {
         ACTIVE_MS: 10_000,
