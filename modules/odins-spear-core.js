@@ -14,7 +14,7 @@
     const logic = OdinContext.logic || null;
 
     // ----------------------------
-    // BASIC UTILS / ENV HELPERS
+    // CONFIG
     // ----------------------------
 
     const SPEAR_VERSION = '1.0.0-odin';
@@ -27,45 +27,43 @@
       API_POST_URL: 'https://torn-war-room-backend-559747349324.us-central1.run.app/spear/api',
 
       // Bundle endpoint (claims + notes + warConfig + chain watchers)
-      API_BUNDLE_URL: 'https://torn-war-room-backend-559747349324.us-central1.run.app/spear/bundle',
+      API_BUNDLE_URL:
+        'https://torn-war-room-backend-559747349324.us-central1.run.app/spear/bundle',
 
       FIREBASE: {
         projectId: 'torn-war-room',
-        apiKey: 'AIzaSyC2uBtW8Rs7B5ZOEHQnnnU0Q2uObTXXsw4',
-      },
-
-      STORAGE: {
-        SESSION_KEY: 'odins-spear-session',
-        SETTINGS_ROOT: 'odinsSpear',
-        LOCAL_CLAIMS_KEY: 'odinsSpearClaims',
-        LOCAL_NOTES_KEY: 'odinsSpearNotes',
-        LOCAL_WAR_KEY: 'odinsSpearWarConfig',
-        WATCHERS_KEY: 'odinsSpearWatchers',
-        WATCHERS_LOG_KEY: 'odinsSpearWatchersLog',
-      },
-
-      LIMITS: {
-        MAX_CLAIMS_PER_TARGET: 3,
-        MAX_CLAIMS_PER_USER: 15,
-        MAX_NOTE_LENGTH: 2000,
-        MAX_WATCHERS: 10,
+        apiKey: 'AIzaSyAXIP665pJj4g9L9i-G-XVBrcJ0e5V4uw',
+        customTokenUrl:
+          'https://torn-war-room-backend-559747349324.us-central1.run.app/auth/issueauthtoken',
       },
 
       REFRESH: {
-        ACTIVE_MS: 10 * 1000,
-        INACTIVE_MS: 60 * 1000,
-        IDLE_AFTER_MS: 5 * 60 * 1000,
+        ACTIVE_MS: 10_000,
+        INACTIVE_MS: 60_000,
       },
 
-      CLAIM_KINDS: {
-        HIT: 'hit',
-        MED: 'med',
+      CLAIM_RULES_DEFAULTS: {
+        keepClaimsUntilInactive: true,
+        requireReclaimAfterSuccess: false,
+        inactivityTimeoutSeconds: 300,
+        maxHospitalReleaseMinutes: 0,
       },
 
-      WAR_TYPES: {
-        NONE: 'none',
-        STANDARD: 'standard',
-        TERM: 'term',
+      STORAGE: {
+        SESSION_KEY: 'spear.session',
+        SETTINGS_ROOT: 'odinsSpear',
+        LOCAL_CLAIMS_KEY: 'spear.localClaims',
+        LOCAL_NOTES_KEY: 'spear.localNotes',
+        LOCAL_WAR_KEY: 'spear.localWarConfig',
+        WATCHERS_KEY: 'spear.watchers', // active chain watchers
+        WATCHERS_LOG_KEY: 'spear.watchersLog', // chain watcher session history
+      },
+
+      LIMITS: {
+        MAX_CLAIMS_PER_TARGET: 1,
+        MAX_CLAIMS_PER_USER: 2,
+        MAX_WATCHERS: 8,
+        MAX_NOTE_LENGTH: 2000,
       },
 
       EVENTS: {
@@ -92,7 +90,7 @@
         WATCHERS_LOG_INIT: 'SPEAR_WATCHERS_LOG_INIT',
         WATCHERS_LOG_UPDATED: 'SPEAR_WATCHERS_LOG_UPDATED',
 
-        // New bridge events for Odin drawer / UI
+        // Bridge events for Odin’s Drawer / UI
         OVERLAY_STATE: 'SPEAR_OVERLAY_STATE',
         UI_EVENT: 'SPEAR_UI_EVENT',
       },
@@ -112,57 +110,87 @@
       return Date.now();
     }
 
-    function safeParseInt(x) {
-      const n = parseInt(x, 10);
-      return Number.isFinite(n) ? n : 0;
+    function safeJsonParse(text, fallback) {
+      if (!text || typeof text !== 'string') return fallback;
+      try {
+        return JSON.parse(text);
+      } catch (_) {
+        return fallback;
+      }
+    }
+
+    function clamp(val, min, max) {
+      val = Number(val);
+      if (!Number.isFinite(val)) return min;
+      if (val < min) return min;
+      if (val > max) return max;
+      return val;
     }
 
     function getUserId() {
       try {
-        return String(state && state.profileId ? state.profileId : '').trim() || null;
+        if (logic && logic.user) {
+          return (
+            logic.user.tornId ||
+            logic.user.player_id ||
+            logic.user.playerId ||
+            logic.user.userID ||
+            logic.user.userid ||
+            null
+          );
+        }
+        if (state && state.user) {
+          return (
+            state.user.tornId ||
+            state.user.player_id ||
+            state.user.playerId ||
+            state.user.userID ||
+            state.user.userid ||
+            null
+          );
+        }
       } catch (_) {}
       return null;
     }
 
     function getFactionId() {
       try {
-        return String(state && state.factionId ? state.factionId : '').trim() || null;
+        if (logic && logic.user && logic.user.factionId) return logic.user.factionId;
+        if (state && state.user && state.user.factionId) return state.user.factionId;
+        if (state && state.user && state.user.faction && state.user.faction.id) {
+          return state.user.faction.id;
+        }
       } catch (_) {}
       return null;
     }
 
-    // Lightweight event adapter
-    function emit(evt, payload) {
+    function getApiKey() {
       try {
-        if (!nexus || typeof nexus.emit !== 'function') return;
-        nexus.emit(evt, payload);
+        if (apiModule && apiModule.apiKey) return apiModule.apiKey;
+        if (state && state.settings && state.settings.apiKey) return state.settings.apiKey;
       } catch (_) {}
+      return null;
     }
 
-    // ---------------------------------------------------------------------------
-    // STORAGE HELPERS
-    // ---------------------------------------------------------------------------
-
     const SettingsStore = {
-      getRoot() {
+      ensureRoot() {
         state.settings = state.settings || {};
-        state.settings[CONFIG.STORAGE.SETTINGS_ROOT] =
-          state.settings[CONFIG.STORAGE.SETTINGS_ROOT] || {};
+        if (!state.settings[CONFIG.STORAGE.SETTINGS_ROOT]) {
+          state.settings[CONFIG.STORAGE.SETTINGS_ROOT] = {};
+        }
         return state.settings[CONFIG.STORAGE.SETTINGS_ROOT];
       },
-
-      get(key, fallback) {
+      get(key, def) {
         try {
-          const root = this.getRoot();
-          return root.hasOwnProperty(key) ? root[key] : fallback;
+          const root = SettingsStore.ensureRoot();
+          return Object.prototype.hasOwnProperty.call(root, key) ? root[key] : def;
         } catch (_) {
-          return fallback;
+          return def;
         }
       },
-
       set(key, value) {
         try {
-          const root = this.getRoot();
+          const root = SettingsStore.ensureRoot();
           root[key] = value;
           if (typeof state.saveToIDB === 'function') {
             state.saveToIDB();
@@ -171,131 +199,28 @@
           log('SettingsStore.set error', e);
         }
       },
-
-      remove(key) {
-        try {
-          const root = this.getRoot();
-          if (root.hasOwnProperty(key)) {
-            delete root[key];
-            if (typeof state.saveToIDB === 'function') {
-              state.saveToIDB();
-            }
-          }
-        } catch (e) {
-          log('SettingsStore.remove error', e);
-        }
-      },
-    };
-
-    const LocalCache = {
-      loadClaims() {
-        try {
-          return JSON.parse(localStorage.getItem(CONFIG.STORAGE.LOCAL_CLAIMS_KEY) || '[]');
-        } catch (_) {
-          return [];
-        }
-      },
-
-      saveClaims(list) {
-        try {
-          localStorage.setItem(CONFIG.STORAGE.LOCAL_CLAIMS_KEY, JSON.stringify(list || []));
-        } catch (_) {}
-      },
-
-      loadNotes() {
-        try {
-          return JSON.parse(localStorage.getItem(CONFIG.STORAGE.LOCAL_NOTES_KEY) || '{}');
-        } catch (_) {
-          return {};
-        }
-      },
-
-      saveNotes(map) {
-        try {
-          localStorage.setItem(
-            CONFIG.STORAGE.LOCAL_NOTES_KEY,
-            JSON.stringify(map || {})
-          );
-        } catch (_) {}
-      },
-
-      loadWarConfig() {
-        try {
-          return JSON.parse(localStorage.getItem(CONFIG.STORAGE.LOCAL_WAR_KEY) || '{}');
-        } catch (_) {
-          return {};
-        }
-      },
-
-      saveWarConfig(cfg) {
-        try {
-          localStorage.setItem(
-            CONFIG.STORAGE.LOCAL_WAR_KEY,
-            JSON.stringify(cfg || {})
-          );
-        } catch (_) {}
-      },
-
-      loadWatchers() {
-        try {
-          return JSON.parse(localStorage.getItem(CONFIG.STORAGE.WATCHERS_KEY) || '[]');
-        } catch (_) {
-          return [];
-        }
-      },
-
-      saveWatchers(list) {
-        try {
-          localStorage.setItem(
-            CONFIG.STORAGE.WATCHERS_KEY,
-            JSON.stringify(list || [])
-          );
-        } catch (_) {}
-      },
-
-      loadWatchersLog() {
-        try {
-          return JSON.parse(
-            localStorage.getItem(CONFIG.STORAGE.WATCHERS_LOG_KEY) || '[]'
-          );
-        } catch (_) {
-          return [];
-        }
-      },
-
-      saveWatchersLog(list) {
-        try {
-          localStorage.setItem(
-            CONFIG.STORAGE.WATCHERS_LOG_KEY,
-            JSON.stringify(list || [])
-          );
-        } catch (_) {}
-      },
     };
 
     // ---------------------------------------------------------------------------
-    // HTTP + GM WRAPPERS
+    // HTTP HELPERS
     // ---------------------------------------------------------------------------
 
-    function gmRequest(method, url, headers, data) {
+    function gmRequest(opts) {
       return new Promise((resolve, reject) => {
+        if (typeof GM_xmlhttpRequest !== 'function') {
+          reject(new Error('GM_xmlhttpRequest not available'));
+          return;
+        }
         try {
-          if (typeof GM_xmlhttpRequest !== 'function') {
-            reject(new Error('GM_xmlhttpRequest not available'));
-            return;
-          }
-
           GM_xmlhttpRequest({
-            method,
-            url,
-            headers,
-            data,
-            onload: function (response) {
-              resolve(response);
-            },
-            onerror: function (err) {
-              reject(err && err.error ? err.error : err);
-            },
+            method: opts.method || 'GET',
+            url: opts.url,
+            headers: opts.headers || {},
+            data: opts.data,
+            timeout: opts.timeout || 30_000,
+            onload: (res) => resolve(res),
+            onerror: (err) => reject(err),
+            ontimeout: () => reject(new Error('Request timed out')),
           });
         } catch (e) {
           reject(e);
@@ -303,514 +228,719 @@
       });
     }
 
-    async function httpJson(method, url, body, headers) {
-      const jsonHeaders = Object.assign(
+    async function httpJson(method, url, body, extraHeaders) {
+      const headers = Object.assign(
         { 'Content-Type': 'application/json' },
-        headers || {}
+        extraHeaders || {}
       );
-
-      const text = body != null ? JSON.stringify(body) : null;
-
-      const res = await gmRequest(method, url, jsonHeaders, text);
-      if (!res || typeof res.responseText !== 'string') return null;
-      try {
-        return JSON.parse(res.responseText);
-      } catch (e) {
-        log('httpJson parse error', e);
+      const res = await gmRequest({
+        method,
+        url,
+        headers,
+        data: body ? JSON.stringify(body) : undefined,
+      });
+      const status = Number(res && res.status) || 0;
+      const text =
+        res && typeof res.responseText === 'string' ? res.responseText : '';
+      if (status < 200 || status >= 300) {
+        const err = new Error(`HTTP ${status} for ${url}`);
+        err.status = status;
+        err.body = text;
+        throw err;
       }
-      return null;
+      if (!text) return {};
+      return safeJsonParse(text, {});
     }
 
-    async function httpForm(method, url, formBody, headers) {
-      const formHeaders = Object.assign(
-        { 'Content-Type': 'application/x-www-form-urlencoded' },
-        headers || {}
-      );
-      const res = await gmRequest(method, url, formHeaders, formBody);
-      if (!res || typeof res.responseText !== 'string') return null;
-      try {
-        return JSON.parse(res.responseText);
-      } catch (e) {
-        log('httpForm parse error', e);
+    async function httpForm(url, bodyObj) {
+      const params = new URLSearchParams();
+      Object.entries(bodyObj || {}).forEach(([k, v]) => {
+        if (v !== undefined && v !== null) params.append(k, String(v));
+      });
+      const headers = { 'Content-Type': 'application/x-www-form-urlencoded' };
+      const res = await gmRequest({
+        method: 'POST',
+        url,
+        headers,
+        data: params.toString(),
+      });
+      const status = Number(res && res.status) || 0;
+      const text =
+        res && typeof res.responseText === 'string' ? res.responseText : '';
+      if (status < 200 || status >= 300) {
+        const err = new Error(`HTTP ${status} for ${url}`);
+        err.status = status;
+        err.body = text;
+        throw err;
       }
-      return null;
+      if (!text) return {};
+      return safeJsonParse(text, {});
     }
 
-    // ---------------------------------------------------------------------------
-    // AUTH + SESSION
-    // ---------------------------------------------------------------------------
+    // ----------------------------
+    // AUTH LAYER
+    // ----------------------------
 
-    function loadSession() {
-      try {
-        return JSON.parse(
-          localStorage.getItem(CONFIG.STORAGE.SESSION_KEY) || 'null'
-        );
-      } catch (_) {
-        return null;
+    const FirebaseAuth = (() => {
+      const SESSION_KEY = CONFIG.STORAGE.SESSION_KEY;
+      const fbCfg = CONFIG.FIREBASE || {};
+      const API_KEY = fbCfg.apiKey || '';
+      const CUSTOM_URL = fbCfg.customTokenUrl || '';
+
+      const SIGN_IN_ENDPOINT = API_KEY
+        ? `https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=${API_KEY}`
+        : null;
+      const REFRESH_ENDPOINT = API_KEY
+        ? `https://securetoken.googleapis.com/v1/token?key=${API_KEY}`
+        : null;
+
+      let session = null;
+
+      function keySnippet(apiKey) {
+        if (!apiKey || typeof apiKey !== 'string') return null;
+        const clean = apiKey.trim();
+        if (clean.length <= 8) return clean;
+        const head = clean.slice(0, 4);
+        const tail = clean.slice(-4);
+        return `${head}…${tail}`;
       }
-    }
 
-    function saveSession(sess) {
-      try {
-        if (!sess) {
-          localStorage.removeItem(CONFIG.STORAGE.SESSION_KEY);
+      function computeExpiresAt(expiresInSec) {
+        const now = nowMs();
+        const secs = Number(expiresInSec) || 0;
+        const ms = secs * 1000;
+        return now + ms - 60_000;
+      }
+
+      function loadSession() {
+        if (session) return session;
+        const raw = SettingsStore.get(SESSION_KEY, null);
+        if (!raw) return null;
+        const parsed = typeof raw === 'string' ? safeJsonParse(raw, null) : raw;
+        if (!parsed || !parsed.idToken || !parsed.refreshToken) return null;
+        session = parsed;
+        return session;
+      }
+
+      function saveSession(next) {
+        session = next;
+        if (!next) {
+          SettingsStore.set(SESSION_KEY, null);
           return;
         }
-        localStorage.setItem(
-          CONFIG.STORAGE.SESSION_KEY,
-          JSON.stringify(sess)
-        );
-      } catch (_) {}
-    }
+        SettingsStore.set(SESSION_KEY, next);
+      }
 
-    async function getTornApiKey() {
-      try {
-        const key = SettingsStore.get('tornApiKey', null);
-        if (key && typeof key === 'string' && key.trim()) {
-          return key.trim();
+      async function mintCustomToken({ tornApiKey, tornId, factionId, version }) {
+        if (!CUSTOM_URL) throw new Error('Custom auth endpoint not configured.');
+        const payload = { tornApiKey, tornId, factionId, version };
+        const json = await httpJson('POST', CUSTOM_URL, payload);
+        if (!json || !json.customToken) {
+          throw new Error('Custom auth endpoint did not return customToken.');
         }
-      } catch (_) {}
-      return null;
-    }
+        return json;
+      }
 
-    async function getOrCreateSession() {
-      const apiKey = await getTornApiKey();
-      if (!apiKey) return null;
+      async function exchangeCustomToId(customToken) {
+        if (!SIGN_IN_ENDPOINT)
+          throw new Error('Firebase sign-in endpoint not configured.');
+        const payload = { token: customToken, returnSecureToken: true };
+        const json = await httpJson('POST', SIGN_IN_ENDPOINT, payload);
+        if (!json || !json.idToken || !json.refreshToken || !json.expiresIn) {
+          throw new Error('Firebase sign-in response missing fields.');
+        }
+        return json;
+      }
 
-      let sess = loadSession();
-      const userId = getUserId() || '0';
-
-      if (
-        !sess ||
-        !sess.refreshToken ||
-        sess.userId !== userId ||
-        sess.apiKeySnippet !== apiKey.slice(0, 8)
-      ) {
-        log('Creating new spear session for user', userId);
-        const body = {
-          action: 'auth.createCustomToken',
-          version: CONFIG.VERSION,
-          tornUserId: userId,
-          tornApiKeySnippet: apiKey.slice(0, 8),
+      async function refreshIdToken(refreshToken) {
+        if (!REFRESH_ENDPOINT)
+          throw new Error('Firebase refresh endpoint not configured.');
+        const payload = {
+          grant_type: 'refresh_token',
+          refresh_token: refreshToken,
         };
-
-        const json = await httpJson('POST', CONFIG.API_POST_URL, body);
-        if (!json || !json.success || !json.customToken) {
-          log('Failed to create spear custom token', json);
-          return null;
+        const json = await httpForm(REFRESH_ENDPOINT, payload);
+        if (
+          !json ||
+          !json.id_token ||
+          !json.refresh_token ||
+          !json.expires_in
+        ) {
+          throw new Error('Firebase refresh response missing fields.');
         }
+        return {
+          idToken: json.id_token,
+          refreshToken: json.refresh_token,
+          expiresIn: json.expires_in,
+        };
+      }
 
-        const formBody =
-          'grant_type=refresh_token&refresh_token=' +
-          encodeURIComponent(json.refreshToken);
-
-        const tokenRes = await httpForm(
-          'POST',
-          'https://securetoken.googleapis.com/v1/token?key=' +
-            CONFIG.FIREBASE.apiKey,
-          formBody
-        );
+      async function ensureIdToken({ allowAutoSignIn = true } = {}) {
+        const cur = loadSession();
+        const snippet = keySnippet(getApiKey() || '');
+        const now = nowMs();
 
         if (
-          !tokenRes ||
-          !tokenRes.id_token ||
-          !tokenRes.refresh_token ||
-          !tokenRes.user_id
+          cur &&
+          cur.idToken &&
+          cur.expiresAt &&
+          cur.refreshToken &&
+          cur.keySnippet === snippet
         ) {
-          log('Failed to exchange refresh token', tokenRes);
-          return null;
+          if (now + 60_000 < cur.expiresAt) {
+            return cur.idToken;
+          }
+          try {
+            const refreshed = await refreshIdToken(cur.refreshToken);
+            const next = {
+              idToken: refreshed.idToken,
+              refreshToken: refreshed.refreshToken,
+              expiresAt: computeExpiresAt(refreshed.expiresIn),
+              keySnippet: snippet,
+              keyHash: cur.keyHash || null,
+              tornId: cur.tornId || getUserId(),
+              factionId: cur.factionId || getFactionId(),
+            };
+            saveSession(next);
+            return next.idToken;
+          } catch (e) {
+            log('Firebase token refresh failed, clearing session', e);
+            saveSession(null);
+          }
         }
 
-        sess = {
-          userId: tokenRes.user_id,
-          idToken: tokenRes.id_token,
-          refreshToken: tokenRes.refresh_token,
-          apiKeySnippet: apiKey.slice(0, 8),
-          lastRefresh: nowMs(),
+        if (!allowAutoSignIn) {
+          throw new Error('No valid auth session; sign-in required.');
+        }
+
+        const tornApiKey = getApiKey();
+        const tornId = getUserId();
+        const factionId = getFactionId();
+        if (!tornApiKey || !tornId) {
+          throw new Error('Missing Torn API key or user ID for auth.');
+        }
+
+        const minted = await mintCustomToken({
+          tornApiKey,
+          tornId,
+          factionId,
+          version: CONFIG.VERSION,
+        });
+        const exchanged = await exchangeCustomToId(minted.customToken);
+
+        const next = {
+          idToken: exchanged.idToken,
+          refreshToken: exchanged.refreshToken,
+          expiresAt: computeExpiresAt(exchanged.expiresIn),
+          keySnippet: snippet,
+          keyHash: minted.keyHash || null,
+          tornId:
+            minted.user && minted.user.tornId ? minted.user.tornId : tornId,
+          factionId:
+            minted.user && minted.user.factionId
+              ? minted.user.factionId
+              : factionId || null,
         };
-        saveSession(sess);
+        saveSession(next);
+        return next.idToken;
       }
 
-      return sess;
-    }
+      async function signInInteractive() {
+        const tornApiKey = getApiKey();
+        const tornId = getUserId();
+        const factionId = getFactionId();
+        if (!tornApiKey || !tornId) {
+          throw new Error('Cannot sign in: missing Torn API key or user ID.');
+        }
 
-    async function getIdToken() {
-      const sess = loadSession();
-      if (!sess || !sess.refreshToken) return null;
+        const minted = await mintCustomToken({
+          tornApiKey,
+          tornId,
+          factionId,
+          version: CONFIG.VERSION,
+        });
+        const exchanged = await exchangeCustomToId(minted.customToken);
+        const snippet = keySnippet(tornApiKey);
 
-      const ageMs = nowMs() - (sess.lastRefresh || 0);
-      const maxAgeMs = 45 * 60 * 1000;
-      if (ageMs < maxAgeMs && sess.idToken) {
-        return sess.idToken;
+        const next = {
+          idToken: exchanged.idToken,
+          refreshToken: exchanged.refreshToken,
+          expiresAt: computeExpiresAt(exchanged.expiresIn),
+          keySnippet: snippet,
+          keyHash: minted.keyHash || null,
+          tornId:
+            minted.user && minted.user.tornId ? minted.user.tornId : tornId,
+          factionId:
+            minted.user && minted.user.factionId
+              ? minted.user.factionId
+              : factionId || null,
+        };
+        saveSession(next);
+        return next;
       }
 
-      const formBody =
-        'grant_type=refresh_token&refresh_token=' +
-        encodeURIComponent(sess.refreshToken);
-
-      const tokenRes = await httpForm(
-        'POST',
-        'https://securetoken.googleapis.com/v1/token?key=' +
-          CONFIG.FIREBASE.apiKey,
-        formBody
-      );
-
-      if (
-        !tokenRes ||
-        !tokenRes.id_token ||
-        !tokenRes.refresh_token ||
-        !tokenRes.user_id
-      ) {
-        log('Failed to refresh id token', tokenRes);
+      function clearSession() {
         saveSession(null);
-        return null;
       }
 
-      const updated = {
-        userId: tokenRes.user_id,
-        idToken: tokenRes.id_token,
-        refreshToken: tokenRes.refresh_token,
-        apiKeySnippet: sess.apiKeySnippet,
-        lastRefresh: nowMs(),
+      return {
+        ensureIdToken,
+        signInInteractive,
+        clearSession,
+        getSession: () => loadSession(),
       };
-      saveSession(updated);
+    })();
 
-      return updated.idToken;
-    }
-
-    async function withIdToken(fn) {
-      const token = await getIdToken();
-      if (!token) {
-        log('No id token available');
-        return null;
-      }
-      return fn(token);
-    }
-
-    // ---------------------------------------------------------------------------
+    // ------------------------
     // API CLIENT
-    // ---------------------------------------------------------------------------
+    // ------------------------
 
     const ApiClient = {
-      async fetchBundle(minClaimsTs, minWarTs, minNotesTs, minWatchersTs, minWatchersLogTs) {
+      async call(action, payload, opts = {}) {
+        const method = (opts.method || 'POST').toUpperCase();
+        const baseUrl =
+          method === 'GET' ? CONFIG.API_GET_URL : CONFIG.API_POST_URL;
+        if (!baseUrl)
+          throw new Error('Odin’s Spear API base URL not configured.');
+
+        const tornId = getUserId();
         const factionId = getFactionId();
-        const userId = getUserId();
-        if (!factionId || !userId) return null;
-
-        return await withIdToken(async (idToken) => {
-          const body = {
-            action: 'bundle.fetch',
-            version: CONFIG.VERSION,
-            tornUserId: userId,
-            tornFactionId: factionId,
-            timestamps: {
-              claims: minClaimsTs || null,
-              war: minWarTs || null,
-              notes: minNotesTs || null,
-              watchers: minWatchersTs || null,
-              watchersLog: minWatchersLogTs || null,
-            },
-          };
-
-          const headers = {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${idToken}`,
-          };
-
-          const json = await httpJson('POST', CONFIG.API_BUNDLE_URL, body, headers);
-          if (json && json.success) {
-            return json;
-          }
-          return null;
+        const idToken = await FirebaseAuth.ensureIdToken({
+          allowAutoSignIn: true,
         });
+
+        const envelope = {
+          action,
+          version: CONFIG.VERSION,
+          tornId,
+          factionId,
+          clientTime: Math.floor(nowMs() / 1000),
+          payload: payload || {},
+        };
+
+        const headers = {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${idToken}`,
+        };
+
+        const json = await httpJson(method, baseUrl, envelope, headers);
+
+        if (json && json.error) {
+          const err = new Error(
+            json.error.message || json.error.code || 'Backend error'
+          );
+          Object.assign(err, json.error);
+          throw err;
+        }
+        return json && typeof json.result !== 'undefined'
+          ? json.result
+          : json;
       },
 
-      async saveClaims(claims) {
+      async fetchBundle({
+        minClaimsTs,
+        minWarTs,
+        minNotesTs,
+        minWatchersTs,
+        minWatchersLogTs,
+      } = {}) {
+        const tornId = getUserId();
         const factionId = getFactionId();
-        const userId = getUserId();
-        if (!factionId || !userId) return null;
-
-        return await withIdToken(async (idToken) => {
-          const body = {
-            action: 'claims.save',
-            version: CONFIG.VERSION,
-            tornUserId: userId,
-            tornFactionId: factionId,
-            claims,
-          };
-
-          const headers = {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${idToken}`,
-          };
-
-          const json = await httpJson('POST', CONFIG.API_POST_URL, body, headers);
-          if (json && json.success) {
-            return json;
-          }
-          return null;
+        const idToken = await FirebaseAuth.ensureIdToken({
+          allowAutoSignIn: true,
         });
+
+        const body = {
+          version: CONFIG.VERSION,
+          tornId,
+          factionId,
+          clientTime: Math.floor(nowMs() / 1000),
+          // All timestamps are ms since epoch (client view)
+          timestamps: {
+            claims: minClaimsTs || null,
+            war: minWarTs || null,
+            notes: minNotesTs || null,
+            watchers: minWatchersTs || null,
+            watchersLog: minWatchersLogTs || null,
+          },
+        };
+
+        const headers = {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${idToken}`,
+        };
+
+        const json = await httpJson(
+          'POST',
+          CONFIG.API_BUNDLE_URL,
+          body,
+          headers
+        );
+        if (json && json.error) {
+          const err = new Error(json.error.message || 'Bundle error');
+          Object.assign(err, json.error);
+          throw err;
+        }
+        return json && json.result ? json.result : json;
       },
 
-      async saveNotes(notesMap) {
-        const factionId = getFactionId();
-        const userId = getUserId();
-        if (!factionId || !userId) return null;
-
-        return await withIdToken(async (idToken) => {
-          const body = {
-            action: 'notes.save',
-            version: CONFIG.VERSION,
-            tornUserId: userId,
-            tornFactionId: factionId,
-            notes: notesMap,
-          };
-
-          const headers = {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${idToken}`,
-          };
-
-          const json = await httpJson('POST', CONFIG.API_POST_URL, body, headers);
-          if (json && json.success) {
-            return json;
-          }
-          return null;
-        });
+      async saveClaims(claimsArray, meta) {
+        return this.call(
+          'claims.save',
+          { claims: claimsArray || [], meta: meta || {} },
+          { method: 'POST' }
+        );
       },
 
-      async saveWarConfig(cfg) {
-        const factionId = getFactionId();
-        const userId = getUserId();
-        if (!factionId || !userId) return null;
-
-        return await withIdToken(async (idToken) => {
-          const body = {
-            action: 'warConfig.save',
-            version: CONFIG.VERSION,
-            tornUserId: userId,
-            tornFactionId: factionId,
-            warConfig: cfg,
-          };
-
-          const headers = {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${idToken}`,
-          };
-
-          const json = await httpJson('POST', CONFIG.API_POST_URL, body, headers);
-          if (json && json.success) {
-            return json;
-          }
-          return null;
-        });
+      async deleteClaim(claimId, meta) {
+        return this.call(
+          'claims.delete',
+          { id: claimId, meta: meta || {} },
+          { method: 'POST' }
+        );
       },
 
-      async saveWatchers(watchersList, watchersLogList) {
-        const factionId = getFactionId();
-        const userId = getUserId();
-        if (!factionId || !userId) return null;
+      async setWarConfig(config, meta) {
+        return this.call(
+          'war.setConfig',
+          { config, meta: meta || {} },
+          { method: 'POST' }
+        );
+      },
 
-        return await withIdToken(async (idToken) => {
-          const body = {
-            action: 'watchers.save',
-            version: CONFIG.VERSION,
-            tornUserId: userId,
-            tornFactionId: factionId,
-            watchers: watchersList,
-            watchersLog: watchersLogList,
-          };
+      async addNote(playerId, text, meta) {
+        return this.call(
+          'notes.add',
+          { playerId, text, meta: meta || {} },
+          { method: 'POST' }
+        );
+      },
 
-          const headers = {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${idToken}`,
-          };
+      async deleteNote(playerId, meta) {
+        return this.call(
+          'notes.delete',
+          { playerId, meta: meta || {} },
+          { method: 'POST' }
+        );
+      },
 
-          const json = await httpJson('POST', CONFIG.API_POST_URL, body, headers);
-          if (json && json.success) {
-            return json;
-          }
-          return null;
-        });
+      async setChainWatchStatus(isOn, meta) {
+        return this.call(
+          'chainWatch.setStatus',
+          { isOn: !!isOn, meta: meta || {} },
+          { method: 'POST' }
+        );
       },
     };
 
-    // ---------------------------------------------------------------------------
-    // LOCAL STATE
-    // ---------------------------------------------------------------------------
+    // ------------------------
+    // CORE STATE
+    // ------------------------
 
     const OdinsSpear = {
+      version: CONFIG.VERSION,
+
       claims: [],
+      warConfig: null,
       notesById: {},
-      warConfig: {},
-      watchers: [],
-      watchersLog: [],
+
       lastClaimsUpdate: 0,
       lastWarUpdate: 0,
       lastNotesUpdate: 0,
+
+      watchers: [],
+      watchersLog: [],
+
       lastWatchersUpdate: 0,
       lastWatchersLogUpdate: 0,
+
+      ready: false,
+      _syncTimer: null,
+      _activityTrackingAttached: false,
     };
 
-    // Initialize from local cache
-    (function bootstrapFromLocal() {
-      try {
-        OdinsSpear.claims = LocalCache.loadClaims();
-        OdinsSpear.notesById = LocalCache.loadNotes();
-        OdinsSpear.warConfig = LocalCache.loadWarConfig();
-        OdinsSpear.watchers = LocalCache.loadWatchers();
-        OdinsSpear.watchersLog = LocalCache.loadWatchersLog();
-      } catch (e) {
-        log('bootstrapFromLocal error', e);
-      }
-    })();
-
-    // -----------------------------------
-    // NORMALIZATION / HELPERS
-    // -----------------------------------
+    // --------------------------
+    // NORMALISERS
+    // --------------------------
 
     function normalizeClaim(raw) {
-      if (!raw || typeof raw !== 'object') return null;
+      if (!raw) return null;
+      const now = nowMs();
+      const obj = {
+        id: String(
+          raw.id ||
+            raw.claimId ||
+            `${raw.targetId || raw.target || 'target'}:${
+              raw.attackerId || raw.attacker || 'attacker'
+            }:${raw.createdAt || now}`
+        ),
+        targetId: String(raw.targetId || raw.target || ''),
+        targetName: raw.targetName || raw.target_name || raw.name || null,
+        targetFactionId: raw.targetFactionId
+          ? String(raw.targetFactionId)
+          : null,
+        targetFactionName: raw.targetFactionName || null,
 
-      const id = String(raw.id || '').trim();
-      const targetId = String(raw.targetId || '').trim();
-      if (!id || !targetId) return null;
+        attackerId: String(
+          raw.attackerId || raw.attacker || getUserId() || ''
+        ),
+        attackerName: raw.attackerName || null,
+        attackerFactionId: raw.attackerFactionId
+          ? String(raw.attackerFactionId)
+          : null,
+        attackerFactionName: raw.attackerFactionName || null,
 
-      return {
-        id,
-        targetId,
-        targetName: raw.targetName || '',
-        targetLevel: safeParseInt(raw.targetLevel),
-        kind: raw.kind || CONFIG.CLAIM_KINDS.HIT,
-        createdAt: safeParseInt(raw.createdAt) || nowMs(),
-        updatedAt: safeParseInt(raw.updatedAt) || nowMs(),
-        status: raw.status || 'active',
-        ownerId: String(raw.ownerId || '').trim(),
-        ownerName: raw.ownerName || '',
-        warKey: raw.warKey || '',
+        warKey: raw.warKey || raw.warId || null,
+
+        kind: raw.kind || raw.type || 'hit', // 'hit' | 'med' | 'assist' | 'retal' | 'other'
+        status: raw.status || 'active', // 'active' | 'completed' | 'expired' | 'cancelled' | 'superseded'
+
+        createdAt: Number(raw.createdAt || raw.created_at || now) || now,
+        updatedAt:
+          Number(raw.updatedAt || raw.updated_at || raw.createdAt || now) ||
+          now,
+        expiresAt: raw.expiresAt ? Number(raw.expiresAt) : null,
+
+        flags: raw.flags || {},
         meta: raw.meta || {},
       };
+
+      if (!obj.targetId || !obj.attackerId) return null;
+      return obj;
     }
 
     function normalizeNote(raw) {
-      if (!raw || typeof raw !== 'object') return null;
-
-      const id = String(raw.id || '').trim();
-      if (!id) return null;
-
+      if (!raw) return null;
+      const now = nowMs();
       let text = String(raw.text || '');
       if (text.length > CONFIG.LIMITS.MAX_NOTE_LENGTH) {
         text = text.slice(0, CONFIG.LIMITS.MAX_NOTE_LENGTH);
       }
-
-      return {
-        id,
+      const obj = {
+        playerId: String(raw.playerId || raw.id || raw.targetId || ''),
         text,
-        updatedAt: safeParseInt(raw.updatedAt) || nowMs(),
-        byUserId: String(raw.byUserId || '').trim(),
-        byUserName: raw.byUserName || '',
+        authorId: raw.authorId ? String(raw.authorId) : null,
+        authorName: raw.authorName || null,
+        updatedAt: Number(raw.updatedAt || raw.updated_at || now) || now,
+        createdAt:
+          Number(raw.createdAt || raw.created_at || raw.updatedAt || now) ||
+          now,
         meta: raw.meta || {},
       };
+      if (!obj.playerId) return null;
+      return obj;
     }
 
     function normalizeWarConfig(raw) {
-      const defaults = {
-        warType: CONFIG.WAR_TYPES.NONE,
-        medDealsEnabled: false,
-        medDealNote: '',
-        keepClaimsUntilInactive: false,
-        requireReclaimAfterSuccess: false,
-        inactivityTimeoutSeconds: 300,
-        maxHospitalReleaseMinutes: 0,
-      };
-
-      const cfg = Object.assign({}, defaults, raw || {});
-
-      cfg.inactivityTimeoutSeconds = Math.min(
-        3600,
-        Math.max(60, safeParseInt(cfg.inactivityTimeoutSeconds) || 300)
-      );
-      cfg.maxHospitalReleaseMinutes = Math.min(
-        1440,
-        Math.max(0, safeParseInt(cfg.maxHospitalReleaseMinutes) || 0)
-      );
-
-      if (!Object.values(CONFIG.WAR_TYPES).includes(cfg.warType)) {
-        cfg.warType = CONFIG.WAR_TYPES.NONE;
-      }
-
-      return cfg;
-    }
-
-    function normalizeWatcher(raw) {
-      if (!raw || typeof raw !== 'object') return null;
-
-      const id = String(raw.id || '').trim();
-      if (!id) return null;
-
+      if (!raw || typeof raw !== 'object') raw = {};
+      const defaults = CONFIG.CLAIM_RULES_DEFAULTS;
       return {
-        id,
-        name: raw.name || '',
-        startedAt: safeParseInt(raw.startedAt) || nowMs(),
-        endedAt: raw.endedAt != null ? safeParseInt(raw.endedAt) : null,
+        warType: raw.warType || raw.type || 'Unknown',
+        medDealsEnabled: !!(raw.medDealsEnabled ?? raw.medDeals ?? false),
+        medDealNote: raw.medDealNote || '',
+
+        keepClaimsUntilInactive:
+          typeof raw.keepClaimsUntilInactive === 'boolean'
+            ? raw.keepClaimsUntilInactive
+            : defaults.keepClaimsUntilInactive,
+
+        requireReclaimAfterSuccess:
+          typeof raw.requireReclaimAfterSuccess === 'boolean'
+            ? raw.requireReclaimAfterSuccess
+            : defaults.requireReclaimAfterSuccess,
+
+        inactivityTimeoutSeconds: clamp(
+          raw.inactivityTimeoutSeconds ??
+            defaults.inactivityTimeoutSeconds,
+          60,
+          60 * 60
+        ),
+
+        maxHospitalReleaseMinutes: clamp(
+          raw.maxHospitalReleaseMinutes ?? defaults.maxHospitalReleaseMinutes,
+          0,
+          24 * 60
+        ),
+
         meta: raw.meta || {},
       };
     }
 
-    // -----------------------------------
-    // WATCHERS: ACTIVE + LOG
-    // -----------------------------------
+    function normalizeWatcher(raw) {
+      if (!raw) return null;
+      const now = nowMs();
+      const id = String(raw.id || raw.playerId || raw.tornId || '');
+      if (!id) return null;
 
-    function setWatchers(list, meta) {
-      const normalized = (list || []).map(normalizeWatcher).filter(Boolean);
-      OdinsSpear.watchers = normalized.filter((w) => w.endedAt == null);
-      LocalCache.saveWatchers(OdinsSpear.watchers);
-      OdinsSpear.lastWatchersUpdate = nowMs();
-      emit(CONFIG.EVENTS.WATCHERS_UPDATED, {
-        watchers: OdinsSpear.watchers,
-        meta: meta || {},
-      });
+      const startedAt =
+        Number(
+          raw.startedAt ||
+            raw.startTime ||
+            raw.started_at ||
+            raw.createdAt ||
+            raw.created_at ||
+            now
+        ) || now;
 
-      emitOverlayState({ source: 'watchers', meta: meta || {} });
+      const endedRaw =
+        raw.endedAt !== undefined
+          ? raw.endedAt
+          : raw.endTime !== undefined
+          ? raw.endTime
+          : raw.ended_at !== undefined
+          ? raw.ended_at
+          : null;
+      const endedAt = endedRaw == null ? null : Number(endedRaw) || null;
+
+      const updatedAt =
+        Number(
+          raw.updatedAt ||
+            raw.updated_at ||
+            (endedAt != null ? endedAt : startedAt) ||
+            now
+        ) || now;
+
+      return {
+        id,
+        name: raw.name || raw.playerName || null,
+        factionId: raw.factionId ? String(raw.factionId) : null,
+        startedAt,
+        endedAt,
+        updatedAt,
+        meta: raw.meta || {},
+      };
     }
 
-    function setWatchersLog(list, meta) {
-      const normalized = (list || []).map(normalizeWatcher).filter(Boolean);
-      OdinsSpear.watchersLog = normalized.slice();
-      LocalCache.saveWatchersLog(OdinsSpear.watchersLog);
-      OdinsSpear.lastWatchersLogUpdate = nowMs();
-      emit(CONFIG.EVENTS.WATCHERS_LOG_UPDATED, {
-        watchersLog: OdinsSpear.watchersLog,
-        meta: meta || {},
-      });
+    // ---------------------------------------------------------------------------
+    // LOCAL PERSISTENCE
+    // ---------------------------------------------------------------------------
 
-      emitOverlayState({ source: 'watchersLog', meta: meta || {} });
+    const LocalCache = {
+      loadClaims() {
+        const raw = SettingsStore.get(CONFIG.STORAGE.LOCAL_CLAIMS_KEY, null);
+        const arr = Array.isArray(raw) ? raw : safeJsonParse(raw, []);
+        const out = [];
+        for (const item of arr) {
+          const c = normalizeClaim(item);
+          if (c) out.push(c);
+        }
+        return out;
+      },
+      saveClaims(list) {
+        try {
+          SettingsStore.set(CONFIG.STORAGE.LOCAL_CLAIMS_KEY, list || []);
+        } catch (_) {}
+      },
+
+      loadNotes() {
+        const raw = SettingsStore.get(CONFIG.STORAGE.LOCAL_NOTES_KEY, null);
+        const obj =
+          raw && typeof raw === 'object' ? raw : safeJsonParse(raw, {});
+        const result = {};
+        if (!obj || typeof obj !== 'object') return {};
+        Object.keys(obj).forEach((pid) => {
+          const n = normalizeNote({ playerId: pid, ...(obj[pid] || {}) });
+          if (n) result[pid] = n;
+        });
+        return result;
+      },
+      saveNotes(map) {
+        try {
+          SettingsStore.set(CONFIG.STORAGE.LOCAL_NOTES_KEY, map || {});
+        } catch (_) {}
+      },
+
+      loadWarConfig() {
+        const raw = SettingsStore.get(CONFIG.STORAGE.LOCAL_WAR_KEY, null);
+        if (!raw) return null;
+        const obj =
+          typeof raw === 'object' ? raw : safeJsonParse(raw, null);
+        return obj ? normalizeWarConfig(obj) : null;
+      },
+      saveWarConfig(cfg) {
+        try {
+          SettingsStore.set(CONFIG.STORAGE.LOCAL_WAR_KEY, cfg || null);
+        } catch (_) {}
+      },
+
+      loadWatchers() {
+        const raw = SettingsStore.get(CONFIG.STORAGE.WATCHERS_KEY, null);
+        const list = Array.isArray(raw) ? raw : safeJsonParse(raw, []);
+        const out = [];
+        for (const w of list) {
+          const n = normalizeWatcher(w);
+          if (!n) continue;
+          if (n.endedAt == null) out.push(n);
+        }
+        return out;
+      },
+      saveWatchers(list) {
+        try {
+          SettingsStore.set(CONFIG.STORAGE.WATCHERS_KEY, list || []);
+        } catch (_) {}
+      },
+
+      loadWatchersLog() {
+        const raw = SettingsStore.get(CONFIG.STORAGE.WATCHERS_LOG_KEY, null);
+        const list = Array.isArray(raw) ? raw : safeJsonParse(raw, []);
+        const out = [];
+        for (const w of list) {
+          const n = normalizeWatcher(w);
+          if (!n) continue;
+          out.push(n);
+        }
+        return out;
+      },
+      saveWatchersLog(list) {
+        try {
+          SettingsStore.set(CONFIG.STORAGE.WATCHERS_LOG_KEY, list || []);
+        } catch (_) {}
+      },
+    };
+
+    // ------------------------
+    // EVENTS
+    // ------------------------
+
+    function emit(eventName, payload) {
+      try {
+        if (nexus && typeof nexus.emit === 'function') {
+          nexus.emit(eventName, payload || {});
+        }
+      } catch (e) {
+        log('nexus.emit error', eventName, e);
+      }
     }
 
     // ----------------------------------------
-    // OVERLAY STATE BRIDGE (for Odin drawer)
+    // OVERLAY STATE BRIDGE FOR ODIN UI
     // ----------------------------------------
 
     function buildOverlayState(meta) {
-      const summary = {
-        activeCount: Array.isArray(OdinsSpear.watchers)
-          ? OdinsSpear.watchers.length
-          : 0,
-        logCount: Array.isArray(OdinsSpear.watchersLog)
-          ? OdinsSpear.watchersLog.length
-          : 0,
-        lastWatchersUpdate: OdinsSpear.lastWatchersUpdate || 0,
-        lastWatchersLogUpdate: OdinsSpear.lastWatchersLogUpdate || 0,
-      };
-
       return {
-        summary,
-        watchers: Array.isArray(OdinsSpear.watchers)
-          ? OdinsSpear.watchers.slice()
-          : [],
-        watchersLog: Array.isArray(OdinsSpear.watchersLog)
-          ? OdinsSpear.watchersLog.slice()
-          : [],
+        summary: {
+          claimsCount: Array.isArray(OdinsSpear.claims)
+            ? OdinsSpear.claims.length
+            : 0,
+          activeWatchersCount: Array.isArray(OdinsSpear.watchers)
+            ? OdinsSpear.watchers.length
+            : 0,
+          watchersLogCount: Array.isArray(OdinsSpear.watchersLog)
+            ? OdinsSpear.watchersLog.length
+            : 0,
+          lastClaimsUpdate: OdinsSpear.lastClaimsUpdate || 0,
+          lastWarUpdate: OdinsSpear.lastWarUpdate || 0,
+          lastNotesUpdate: OdinsSpear.lastNotesUpdate || 0,
+          lastWatchersUpdate: OdinsSpear.lastWatchersUpdate || 0,
+          lastWatchersLogUpdate: OdinsSpear.lastWatchersLogUpdate || 0,
+        },
+        claims: (OdinsSpear.claims || []).slice(),
+        warConfig: OdinsSpear.warConfig
+          ? { ...OdinsSpear.warConfig }
+          : null,
+        notesById: { ...(OdinsSpear.notesById || {}) },
+        watchers: (OdinsSpear.watchers || []).slice(),
+        watchersLog: (OdinsSpear.watchersLog || []).slice(),
         meta: meta || {},
       };
     }
@@ -823,73 +953,61 @@
       }
     }
 
-    // -----------------------------------
-    // CLAIMS SERVICE
-    // ------------------------------------
+    // -----------------------------
+    // CORE MUTATORS
+    // -----------------------------
 
-    const ClaimsService = {
-      getAll() {
-        return OdinsSpear.claims.slice();
-      },
+    function setClaims(next, meta) {
+      if (!Array.isArray(next)) next = [];
+      OdinsSpear.claims = next.map(normalizeClaim).filter(Boolean);
+      LocalCache.saveClaims(OdinsSpear.claims);
+      OdinsSpear.lastClaimsUpdate = nowMs();
+      const payloadMeta = meta || {};
+      emit(CONFIG.EVENTS.CLAIMS_UPDATED, {
+        claims: OdinsSpear.claims,
+        meta: payloadMeta,
+      });
+      emitOverlayState(
+        Object.assign({ source: 'claims' }, payloadMeta)
+      );
+    }
 
-      getForTarget(targetId) {
-        const id = String(targetId || '').trim();
-        if (!id) return [];
-        return OdinsSpear.claims.filter((c) => c.targetId === id);
-      },
-
-      getMyClaims() {
-        const me = String(getUserId() || '');
-        if (!me) return [];
-        return OdinsSpear.claims.filter((c) => c.ownerId === me);
-      },
-
-      getMyActiveClaims() {
-        const me = String(getUserId() || '');
-        if (!me) return [];
-        return OdinsSpear.claims.filter(
-          (c) => c.ownerId === me && c.status === 'active'
-        );
-      },
-
-      setFromServer(list) {
-        const normalized =
-          (list || []).map(normalizeClaim).filter(Boolean) || [];
-        OdinsSpear.claims = normalized;
-        LocalCache.saveClaims(OdinsSpear.claims);
-        OdinsSpear.lastClaimsUpdate = nowMs();
-        emit(CONFIG.EVENTS.CLAIMS_UPDATED, {
-          claims: OdinsSpear.claims.slice(),
-        });
-      },
-
-      async saveToServer() {
-        const payload = OdinsSpear.claims.slice();
-        const res = await ApiClient.saveClaims(payload);
-        if (res && res.success && Array.isArray(res.claims)) {
-          this.setFromServer(res.claims);
-        }
-      },
-    };
+    function mutateClaims(updater, meta) {
+      try {
+        const cur = OdinsSpear.claims || [];
+        const next = updater(cur.slice()) || cur;
+        setClaims(next, meta);
+      } catch (e) {
+        log('mutateClaims error', e);
+      }
+    }
 
     function setNotes(nextMap, meta) {
       OdinsSpear.notesById = nextMap || {};
       LocalCache.saveNotes(OdinsSpear.notesById);
       OdinsSpear.lastNotesUpdate = nowMs();
+      const payloadMeta = meta || {};
       emit(CONFIG.EVENTS.NOTES_UPDATED, {
         notesById: OdinsSpear.notesById,
-        meta: meta || {},
+        meta: payloadMeta,
       });
+      emitOverlayState(
+        Object.assign({ source: 'notes' }, payloadMeta)
+      );
     }
 
     function setWarConfig(cfg, meta) {
       OdinsSpear.warConfig = cfg ? normalizeWarConfig(cfg) : null;
       LocalCache.saveWarConfig(OdinsSpear.warConfig);
       OdinsSpear.lastWarUpdate = nowMs();
+      const payloadMeta = meta || {};
       emit(CONFIG.EVENTS.WAR_UPDATED, {
         warConfig: OdinsSpear.warConfig,
-        meta: meta || {},
+        meta: payloadMeta,
       });
+      emitOverlayState(
+        Object.assign({ source: 'warConfig' }, payloadMeta)
+      );
     }
 
     function setWatchers(list, meta) {
@@ -897,10 +1015,14 @@
       OdinsSpear.watchers = normalized.filter((w) => w.endedAt == null);
       LocalCache.saveWatchers(OdinsSpear.watchers);
       OdinsSpear.lastWatchersUpdate = nowMs();
+      const payloadMeta = meta || {};
       emit(CONFIG.EVENTS.WATCHERS_UPDATED, {
         watchers: OdinsSpear.watchers,
-        meta: meta || {},
+        meta: payloadMeta,
       });
+      emitOverlayState(
+        Object.assign({ source: 'watchers' }, payloadMeta)
+      );
     }
 
     function setWatchersLog(list, meta) {
@@ -908,10 +1030,14 @@
       OdinsSpear.watchersLog = normalized.slice();
       LocalCache.saveWatchersLog(OdinsSpear.watchersLog);
       OdinsSpear.lastWatchersLogUpdate = nowMs();
+      const payloadMeta = meta || {};
       emit(CONFIG.EVENTS.WATCHERS_LOG_UPDATED, {
         watchersLog: OdinsSpear.watchersLog,
-        meta: meta || {},
+        meta: payloadMeta,
       });
+      emitOverlayState(
+        Object.assign({ source: 'watchersLog' }, payloadMeta)
+      );
     }
 
     // -----------------------------------
@@ -950,7 +1076,9 @@
       hasTargetClaimed(targetId) {
         const id = String(targetId || '');
         if (!id) return false;
-        return OdinsSpear.claims.some((c) => c.targetId === id && c.status === 'active');
+        return OdinsSpear.claims.some(
+          (c) => c.targetId === id && c.status === 'active'
+        );
       },
 
       getWarConfig() {
@@ -969,7 +1097,9 @@
         const warCfg = OdinsSpear.warConfig || normalizeWarConfig({});
 
         if (myActive.length >= CONFIG.LIMITS.MAX_CLAIMS_PER_USER) {
-          const err = new Error('You already have the maximum number of active claims.');
+          const err = new Error(
+            'You already have the maximum number of active claims.'
+          );
           err.code = 'claims_quota_reached';
           throw err;
         }
@@ -982,12 +1112,16 @@
           const myActiveMeds = myActive.filter((c) => c.kind === 'med');
 
           if (kind === 'hit' && myActiveHits.length >= 1) {
-            const err = new Error('You already have an active hit claim in current war.');
+            const err = new Error(
+              'You already have an active hit claim in current war.'
+            );
             err.code = 'claims_hit_limit';
             throw err;
           }
           if (kind === 'med' && myActiveMeds.length >= 1) {
-            const err = new Error('You already have an active med agreement in current war.');
+            const err = new Error(
+              'You already have an active med agreement in current war.'
+            );
             err.code = 'claims_med_limit';
             throw err;
           }
@@ -1010,7 +1144,9 @@
         const id = String(targetId || '');
         if (!id) throw new Error('Missing targetId.');
 
-        const activeForTarget = ClaimsService.getForTarget(id).filter((c) => c.status === 'active');
+        const activeForTarget = ClaimsService.getForTarget(id).filter(
+          (c) => c.status === 'active'
+        );
         if (activeForTarget.length >= CONFIG.LIMITS.MAX_CLAIMS_PER_TARGET) {
           const err = new Error('Target already has an active claim.');
           err.code = 'claims_target_occupied';
@@ -1039,10 +1175,9 @@
           meta: meta || {},
         });
 
-        mutateClaims(
-          (cur) => cur.concat(claim),
-          { source: 'local-create' }
-        );
+        mutateClaims((cur) => cur.concat(claim), {
+          source: 'local-create',
+        });
 
         emit(CONFIG.EVENTS.CLAIM_CREATED, { claim, meta: meta || {} });
 
@@ -1051,7 +1186,9 @@
             source: 'create',
           });
           if (result && Array.isArray(result.claims)) {
-            const normalized = result.claims.map(normalizeClaim).filter(Boolean);
+            const normalized = result.claims
+              .map(normalizeClaim)
+              .filter(Boolean);
             setClaims(normalized, { source: 'server-ack' });
           }
         } catch (e) {
@@ -1315,7 +1452,7 @@
         const me = String(getUserId() || '');
         if (!me) return false;
         return (OdinsSpear.watchers || []).some(
-          (w) => w.id === me && (w.endedAt == null)
+          (w) => w.id === me && w.endedAt == null
         );
       },
 
@@ -1356,7 +1493,7 @@
           // Start a new chain watch session for user
           const myName = logic && logic.user && logic.user.name;
           const factionId = getFactionId();
-          // Drop any stale active entries formuser
+          // Drop any stale active entries for user
           nextActive = nextActive.filter((w) => w.id !== me);
           nextActive.push({
             id: me,
@@ -1367,7 +1504,7 @@
             updatedAt: now,
           });
         } else {
-          // Stop users active session and push it into the log
+          // Stop user's active session and push it into the log
           const remainingActive = [];
           let closedSession = null;
           for (const w of nextActive) {
@@ -1387,17 +1524,31 @@
           }
         }
 
-        setWatchers(nextActive, { source: 'local-chain-watch', meta, isOn });
-        setWatchersLog(nextLog, { source: 'local-chain-watch', meta, isOn });
+        setWatchers(nextActive, {
+          source: 'local-chain-watch',
+          meta,
+          isOn,
+        });
+        setWatchersLog(nextLog, {
+          source: 'local-chain-watch',
+          meta,
+          isOn,
+        });
 
         try {
           const result = await ApiClient.setChainWatchStatus(isOn, meta);
           if (result) {
             if (Array.isArray(result.watchers)) {
-              setWatchers(result.watchers, { source: 'server-ack', isOn });
+              setWatchers(result.watchers, {
+                source: 'server-ack',
+                isOn,
+              });
             }
             if (Array.isArray(result.watchersLog)) {
-              setWatchersLog(result.watchersLog, { source: 'server-ack', isOn });
+              setWatchersLog(result.watchersLog, {
+                source: 'server-ack',
+                isOn,
+              });
             }
           }
         } catch (e) {
@@ -1433,7 +1584,11 @@
         Object.values(logObj).forEach((attack) => {
           if (!attack || typeof attack !== 'object') return;
           const ts =
-            Number(attack.timestamp_ended || attack.timestamp_complete || attack.timestamp) || 0;
+            Number(
+              attack.timestamp_ended ||
+                attack.timestamp_complete ||
+                attack.timestamp
+            ) || 0;
           if (!ts || ts < cutoff) return;
 
           const attackerId = String(
@@ -1470,7 +1625,11 @@
     const FrekiBridge = {
       isAvailable() {
         try {
-          return typeof window.Freki === 'object' && window.Freki && window.Freki.ready;
+          return (
+            typeof window.Freki === 'object' &&
+            window.Freki &&
+            window.Freki.ready
+          );
         } catch (_) {
           return false;
         }
@@ -1629,13 +1788,18 @@
         emit(CONFIG.EVENTS.NOTES_INIT, { notesById: OdinsSpear.notesById });
         emit(CONFIG.EVENTS.WAR_INIT, { warConfig: OdinsSpear.warConfig });
         emit(CONFIG.EVENTS.WATCHERS_INIT, { watchers: OdinsSpear.watchers });
-        emit(CONFIG.EVENTS.WATCHERS_LOG_INIT, { watchersLog: OdinsSpear.watchersLog });
+        emit(CONFIG.EVENTS.WATCHERS_LOG_INIT, {
+          watchersLog: OdinsSpear.watchersLog,
+        });
 
         syncBundleOnce('boot');
         attachActivityTracking();
 
         OdinsSpear.ready = true;
         emit(CONFIG.EVENTS.READY, { version: OdinsSpear.version });
+        // Initial overlay snapshot for Odin UI
+        emitOverlayState({ source: 'init' });
+
         log('Odin’s Spear core initialised', { version: OdinsSpear.version });
       } catch (e) {
         log('Odin’s Spear init error', e);
