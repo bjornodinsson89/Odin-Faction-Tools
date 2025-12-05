@@ -57,6 +57,7 @@
         LOCAL_WAR_KEY: 'spear.localWarConfig',
         WATCHERS_KEY: 'spear.watchers', // active chain watchers
         WATCHERS_LOG_KEY: 'spear.watchersLog', // chain watcher session history
+        ATTACK_LOG_KEY: 'spear.attackLog', // ranked war attack log (normalized)
       },
 
       LIMITS: {
@@ -89,6 +90,10 @@
         // Chain watcher session log (for leadership export / auditing)
         WATCHERS_LOG_INIT: 'SPEAR_WATCHERS_LOG_INIT',
         WATCHERS_LOG_UPDATED: 'SPEAR_WATCHERS_LOG_UPDATED',
+
+        // Ranked war attack log
+        ATTACK_LOG_INIT: 'SPEAR_ATTACK_LOG_INIT',
+        ATTACK_LOG_UPDATED: 'SPEAR_ATTACK_LOG_UPDATED',
 
         // Bridge events for Odin’s Drawer / UI
         OVERLAY_STATE: 'SPEAR_OVERLAY_STATE',
@@ -654,6 +659,10 @@
       lastWatchersUpdate: 0,
       lastWatchersLogUpdate: 0,
 
+      // Ranked war attack log
+      attacks: [],
+      lastAttacksUpdate: 0,
+
       ready: false,
       _syncTimer: null,
       _activityTrackingAttached: false,
@@ -762,6 +771,28 @@
           24 * 60
         ),
 
+        // Per-war claim limits
+        maxClaimsPerTarget: clamp(
+          raw.maxClaimsPerTarget ?? CONFIG.LIMITS.MAX_CLAIMS_PER_TARGET,
+          1,
+          10
+        ),
+
+        maxClaimsPerUser: clamp(
+          raw.maxClaimsPerUser ?? CONFIG.LIMITS.MAX_CLAIMS_PER_USER,
+          1,
+          20
+        ),
+
+        maxMedClaimsPerUser:
+          raw.maxMedClaimsPerUser != null
+            ? clamp(raw.maxMedClaimsPerUser, 0, 10)
+            : null,
+
+        allowedTargetStatuses: Array.isArray(raw.allowedTargetStatuses)
+          ? raw.allowedTargetStatuses.map((s) => String(s))
+          : [],
+
         meta: raw.meta || {},
       };
     }
@@ -807,6 +838,149 @@
         startedAt,
         endedAt,
         updatedAt,
+        meta: raw.meta || {},
+      };
+    }
+
+    function normalizeAttack(raw) {
+      if (!raw || typeof raw !== 'object') return null;
+
+      const now = nowMs();
+
+      // IDs
+      const attackerId =
+        raw.attackerId ||
+        raw.attacker_id ||
+        (raw.attacker && raw.attacker.id) ||
+        raw.attacker ||
+        null;
+      const defenderId =
+        raw.defenderId ||
+        raw.defender_id ||
+        (raw.defender && raw.defender.id) ||
+        raw.defender ||
+        null;
+
+      if (!attackerId || !defenderId) return null;
+
+      const id =
+        String(
+          raw.id ||
+            raw.attackId ||
+            raw.attack_id ||
+            raw.code ||
+            `${attackerId}:${defenderId}:${
+              raw.timestamp_ended || raw.timestamp_complete || raw.timestamp || now
+            }`
+        ) || null;
+
+      const attackerName =
+        (raw.attacker && raw.attacker.name) ||
+        raw.attackerName ||
+        raw.attacker_name ||
+        null;
+      const defenderName =
+        (raw.defender && raw.defender.name) ||
+        raw.defenderName ||
+        raw.defender_name ||
+        null;
+
+      const attackerFactionId =
+        (raw.attacker && raw.attacker.factionId) ||
+        raw.attackerFactionId ||
+        raw.attacker_faction ||
+        null;
+      const defenderFactionId =
+        (raw.defender && raw.defender.factionId) ||
+        raw.defenderFactionId ||
+        raw.defender_faction ||
+        null;
+
+      // Timestamps (seconds or ms; we normalize to seconds)
+      const endedSec =
+        Number(
+          raw.timestamp_ended ||
+            raw.ended ||
+            raw.end ||
+            raw.finish ||
+            raw.timestamp_complete ||
+            raw.timestamp ||
+            0
+        ) || 0;
+      const startedSec =
+        Number(
+          raw.timestamp_started ||
+            raw.started ||
+            raw.start ||
+            raw.begin ||
+            endedSec ||
+            0
+        ) || endedSec;
+
+      const toSec = (v) => {
+        if (!v) return 0;
+        // If it looks like ms, downscale
+        if (v > 3_000_000_000) return Math.floor(v / 1000);
+        return Math.floor(v);
+      };
+
+      const startedAt = toSec(startedSec);
+      const endedAt = toSec(endedSec);
+
+      const result =
+        raw.result ||
+        raw.outcome ||
+        raw.status ||
+        raw.result_text ||
+        'Unknown';
+
+      const respectGain =
+        Number(raw.respect_gain ?? raw.respectGain ?? raw.respect ?? 0) || 0;
+
+      const chain =
+        raw.chain != null
+          ? Number(raw.chain) || 0
+          : raw.chainId != null
+          ? Number(raw.chainId) || 0
+          : null;
+
+      const chainGapSeconds =
+        raw.time_since_last_attack != null
+          ? Number(raw.time_since_last_attack) || 0
+          : raw.chainGapSeconds != null
+          ? Number(raw.chainGapSeconds) || 0
+          : null;
+
+      const chainSaver =
+        !!(raw.chain_saver ?? raw.chainSaver ?? raw.isChainSaver ?? false);
+
+      const overseas = !!(raw.overseas ?? raw.is_overseas ?? false);
+      const outsideWar = !!(raw.outside_war ?? raw.outsideWar ?? false);
+      const retaliation = !!(raw.retaliation ?? raw.isRetal ?? raw.retal ?? false);
+
+      return {
+        id,
+        warId: raw.warId || raw.war_id || raw.warKey || null,
+
+        attackerId: Number(attackerId),
+        defenderId: Number(defenderId),
+        attackerName,
+        defenderName,
+        attackerFactionId: attackerFactionId ? String(attackerFactionId) : null,
+        defenderFactionId: defenderFactionId ? String(defenderFactionId) : null,
+
+        startedAt,
+        endedAt: endedAt || null,
+
+        result,
+        respectGain,
+        chain,
+        chainGapSeconds,
+        overseas,
+        outsideWar,
+        retaliation,
+        chainSaver,
+
         meta: raw.meta || {},
       };
     }
@@ -894,6 +1068,22 @@
       saveWatchersLog(list) {
         try {
           SettingsStore.set(CONFIG.STORAGE.WATCHERS_LOG_KEY, list || []);
+        } catch (_) {}
+      },
+
+      loadAttackLog() {
+        const raw = SettingsStore.get(CONFIG.STORAGE.ATTACK_LOG_KEY, null);
+        const arr = Array.isArray(raw) ? raw : safeJsonParse(raw, []);
+        const out = [];
+        for (const item of arr) {
+          const a = normalizeAttack(item);
+          if (a) out.push(a);
+        }
+        return out;
+      },
+      saveAttackLog(list) {
+        try {
+          SettingsStore.set(CONFIG.STORAGE.ATTACK_LOG_KEY, list || []);
         } catch (_) {}
       },
     };
@@ -1040,6 +1230,27 @@
       );
     }
 
+    function setAttackLog(list, meta) {
+      const normalized = (list || []).map(normalizeAttack).filter(Boolean);
+      OdinsSpear.attacks = normalized.slice();
+      LocalCache.saveAttackLog(OdinsSpear.attacks);
+      OdinsSpear.lastAttacksUpdate = nowMs();
+      emit(CONFIG.EVENTS.ATTACK_LOG_UPDATED, {
+        attacks: OdinsSpear.attacks,
+        meta: meta || {},
+      });
+    }
+
+    function mutateAttackLog(updater, meta) {
+      try {
+        const cur = OdinsSpear.attacks || [];
+        const next = updater(cur.slice()) || cur;
+        setAttackLog(next, meta);
+      } catch (e) {
+        log('mutateAttackLog error', e);
+      }
+    }
+
     // -----------------------------------
     // CLAIMS SERVICE
     // ------------------------------------
@@ -1096,7 +1307,12 @@
         const myActive = ClaimsService.getMyActiveClaims({});
         const warCfg = OdinsSpear.warConfig || normalizeWarConfig({});
 
-        if (myActive.length >= CONFIG.LIMITS.MAX_CLAIMS_PER_USER) {
+        const maxPerUser =
+          warCfg.maxClaimsPerUser != null
+            ? warCfg.maxClaimsPerUser
+            : CONFIG.LIMITS.MAX_CLAIMS_PER_USER;
+
+        if (myActive.length >= maxPerUser) {
           const err = new Error(
             'You already have the maximum number of active claims.'
           );
@@ -1111,6 +1327,7 @@
           const myActiveHits = myActive.filter((c) => c.kind === 'hit');
           const myActiveMeds = myActive.filter((c) => c.kind === 'med');
 
+          // Hits in termed wars: still 1 per user
           if (kind === 'hit' && myActiveHits.length >= 1) {
             const err = new Error(
               'You already have an active hit claim in current war.'
@@ -1118,9 +1335,15 @@
             err.code = 'claims_hit_limit';
             throw err;
           }
-          if (kind === 'med' && myActiveMeds.length >= 1) {
+
+          // Meds in termed wars: either a per-war override or default 1
+          const maxMed =
+            warCfg.maxMedClaimsPerUser != null
+              ? warCfg.maxMedClaimsPerUser
+              : 1;
+          if (kind === 'med' && myActiveMeds.length >= maxMed) {
             const err = new Error(
-              'You already have an active med agreement in current war.'
+              'You already have the maximum number of med agreements in current war.'
             );
             err.code = 'claims_med_limit';
             throw err;
@@ -1144,10 +1367,16 @@
         const id = String(targetId || '');
         if (!id) throw new Error('Missing targetId.');
 
+        const warCfg = OdinsSpear.warConfig || normalizeWarConfig({});
+        const maxPerTarget =
+          warCfg.maxClaimsPerTarget != null
+            ? warCfg.maxClaimsPerTarget
+            : CONFIG.LIMITS.MAX_CLAIMS_PER_TARGET;
+
         const activeForTarget = ClaimsService.getForTarget(id).filter(
           (c) => c.status === 'active'
         );
-        if (activeForTarget.length >= CONFIG.LIMITS.MAX_CLAIMS_PER_TARGET) {
+        if (activeForTarget.length >= maxPerTarget) {
           const err = new Error('Target already has an active claim.');
           err.code = 'claims_target_occupied';
           throw err;
@@ -1571,6 +1800,349 @@
     };
 
     // -----------------------------
+    // ATTACK LOG SERVICE
+    // -----------------------------
+
+    const AttackLogService = {
+      // Return all normalized attacks
+      getAll() {
+        return (OdinsSpear.attacks || []).slice();
+      },
+
+      // Filter by warId + optional filters
+      getForWar(warId, filter = {}) {
+        const id = warId == null ? null : String(warId);
+        const all = OdinsSpear.attacks || [];
+        return all.filter((a) => {
+          if (id && String(a.warId || '') !== id) return false;
+
+          if (filter.attackerFactionId != null) {
+            const fId = String(filter.attackerFactionId);
+            if (String(a.attackerFactionId || '') !== fId) return false;
+          }
+          if (filter.defenderFactionId != null) {
+            const fId = String(filter.defenderFactionId);
+            if (String(a.defenderFactionId || '') !== fId) return false;
+          }
+          if (filter.since != null) {
+            const since = Number(filter.since) || 0;
+            if (!a.startedAt || a.startedAt < since) return false;
+          }
+          if (filter.until != null) {
+            const until = Number(filter.until) || 0;
+            if (!a.startedAt || a.startedAt > until) return false;
+          }
+
+          if (filter.onlyOurFaction) {
+            const myFaction = getFactionId();
+            if (!myFaction) return false;
+            if (String(a.attackerFactionId || '') !== String(myFaction)) return false;
+          }
+
+          return true;
+        });
+      },
+
+      // Recent N attacks (optionally filtered)
+      getRecent(limit = 100, filter = {}) {
+        const all = (OdinsSpear.attacks || []).slice();
+        all.sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
+        const filtered = filter && Object.keys(filter).length
+          ? all.filter((a) => this._matchFilter(a, filter))
+          : all;
+        return filtered.slice(0, limit);
+      },
+
+      _matchFilter(a, filter) {
+        if (!filter) return true;
+        if (filter.warId != null) {
+          if (String(a.warId || '') !== String(filter.warId)) return false;
+        }
+        if (filter.attackerId != null) {
+          if (String(a.attackerId || '') !== String(filter.attackerId)) return false;
+        }
+        if (filter.defenderId != null) {
+          if (String(a.defenderId || '') !== String(filter.defenderId)) return false;
+        }
+        if (filter.onlyOurFaction) {
+          const myFaction = getFactionId();
+          if (!myFaction) return false;
+          if (String(a.attackerFactionId || '') !== String(myFaction)) return false;
+        }
+        return true;
+      },
+
+      // Replace entire local log (used when backend sends a full manifest)
+      replaceAll(rawList, meta = {}) {
+        const normalized = (rawList || []).map(normalizeAttack).filter(Boolean);
+        setAttackLog(normalized, { source: 'attack-replace', meta });
+        return this.getAll();
+      },
+
+      // Ingest additional attacks by merging into existing log (de-dup by id)
+      ingest(rawList, meta = {}) {
+        const additions = (rawList || []).map(normalizeAttack).filter(Boolean);
+        if (!additions.length) return this.getAll();
+        mutateAttackLog(
+          (cur) => {
+            const byId = {};
+            cur.forEach((a) => {
+              if (a && a.id) byId[a.id] = a;
+            });
+            additions.forEach((a) => {
+              if (a && a.id) {
+                const existing = byId[a.id];
+                byId[a.id] = existing && existing.endedAt && !a.endedAt ? existing : a;
+              }
+            });
+            return Object.values(byId);
+          },
+          { source: 'attack-ingest', meta }
+        );
+        return this.getAll();
+      },
+
+      // CSV export for a given war (or all wars if warId is null)
+      toCsv(warId, filter = {}) {
+        const rows = this.getForWar(warId, filter);
+        const headers = [
+          'Time',
+          'WarId',
+          'AttackerId',
+          'AttackerName',
+          'DefenderId',
+          'DefenderName',
+          'AttackerFactionId',
+          'DefenderFactionId',
+          'Result',
+          'RespectGain',
+          'Chain',
+          'ChainGapSeconds',
+          'Overseas',
+          'OutsideWar',
+          'Retaliation',
+          'ChainSaver',
+        ];
+
+        const fmtTime = (sec) => {
+          if (!sec) return '';
+          try {
+            const d = new Date(sec * 1000);
+            return d.toISOString();
+          } catch (_) {
+            return String(sec);
+          }
+        };
+
+        const lines = [];
+        lines.push(headers.join(','));
+
+        rows.forEach((a) => {
+          const line = [
+            fmtTime(a.startedAt),
+            a.warId || '',
+            a.attackerId ?? '',
+            a.attackerName ?? '',
+            a.defenderId ?? '',
+            a.defenderName ?? '',
+            a.attackerFactionId ?? '',
+            a.defenderFactionId ?? '',
+            a.result ?? '',
+            a.respectGain ?? '',
+            a.chain ?? '',
+            a.chainGapSeconds ?? '',
+            a.overseas ? '1' : '0',
+            a.outsideWar ? '1' : '0',
+            a.retaliation ? '1' : '0',
+            a.chainSaver ? '1' : '0',
+          ]
+            .map((v) => {
+              const s = String(v ?? '');
+              // basic CSV escaping
+              return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+            })
+            .join(',');
+          lines.push(line);
+        });
+
+        return lines.join('\n');
+      },
+
+      // Summary stats for a war
+      summarizeWar(warId, filter = {}) {
+        const rows = this.getForWar(warId, filter);
+        if (!rows.length) {
+          return {
+            warId: warId || null,
+            totalAttacks: 0,
+            totalRespect: 0,
+            avgRespectPerHit: 0,
+            chains: {
+              count: 0,
+              longestChain: 0,
+              avgChainGap: 0,
+            },
+            overseasHits: 0,
+            retals: 0,
+            outsideWarHits: 0,
+          };
+        }
+
+        let totalAttacks = 0;
+        let totalRespect = 0;
+        let chainCount = 0;
+        let longestChain = 0;
+        let totalChainGap = 0;
+        let overseasHits = 0;
+        let retals = 0;
+        let outsideWarHits = 0;
+
+        rows.forEach((a) => {
+          totalAttacks += 1;
+          totalRespect += Number(a.respectGain || 0);
+
+          if (a.chain != null && a.chain > 0) {
+            chainCount += 1;
+            if (a.chain > longestChain) longestChain = a.chain;
+          }
+
+          if (a.chainGapSeconds != null && a.chainGapSeconds > 0) {
+            totalChainGap += a.chainGapSeconds;
+          }
+
+          if (a.overseas) overseasHits += 1;
+          if (a.retaliation) retals += 1;
+          if (a.outsideWar) outsideWarHits += 1;
+        });
+
+        const avgRespectPerHit = totalAttacks ? totalRespect / totalAttacks : 0;
+        const avgChainGap =
+          chainCount && totalChainGap ? totalChainGap / chainCount : 0;
+
+        return {
+          warId: warId || null,
+          totalAttacks,
+          totalRespect,
+          avgRespectPerHit,
+          chains: {
+            count: chainCount,
+            longestChain,
+            avgChainGap,
+          },
+          overseasHits,
+          retals,
+          outsideWarHits,
+        };
+      },
+    };
+
+    // -----------------------------
+    // UNAUTHORIZED ATTACK SERVICE
+    // -----------------------------
+
+    const UnauthorizedAttackService = {
+      /**
+       * rules: array of {
+       *   type: 'hitMedDealTarget' |
+       *         'hitOwnFaction' |
+       *         'hitDisallowedStatus' |
+       *         'hitBelowRespectThreshold' |
+       *         'hitOutsideWar'
+       * }
+       */
+      getViolations(warId, rules) {
+        const ruleList = Array.isArray(rules) ? rules : [];
+        if (!ruleList.length) return [];
+
+        const warCfg = OdinsSpear.warConfig || normalizeWarConfig({});
+        const myFactionId = getFactionId();
+        if (!myFactionId) return [];
+
+        const attacks = AttackLogService.getForWar(warId, {
+          onlyOurFaction: true,
+        });
+
+        const activeClaims = ClaimsService.getAll().filter(
+          (c) => c.status === 'active'
+        );
+
+        const violations = [];
+
+        attacks.forEach((a) => {
+          const violated = [];
+
+          ruleList.forEach((rule) => {
+            if (!rule || !rule.type) return;
+
+            if (rule.type === 'hitOwnFaction') {
+              if (
+                String(a.defenderFactionId || '') === String(myFactionId) &&
+                String(a.attackerFactionId || '') === String(myFactionId)
+              ) {
+                violated.push(rule);
+              }
+            }
+
+            if (rule.type === 'hitOutsideWar') {
+              if (a.outsideWar) {
+                violated.push(rule);
+              }
+            }
+
+            if (rule.type === 'hitBelowRespectThreshold') {
+              const min = Number(rule.minRespect) || 0;
+              if (Number(a.respectGain || 0) < min) {
+                violated.push(rule);
+              }
+            }
+
+            if (rule.type === 'hitMedDealTarget') {
+              // Check if defender currently has an active med claim with our faction
+              const targetId = String(a.defenderId || '');
+              if (!targetId) return;
+
+              const medClaims = activeClaims.filter(
+                (c) => c.kind === 'med' && String(c.targetId || '') === targetId
+              );
+              if (medClaims.length) {
+                violated.push(rule);
+              }
+            }
+
+            if (rule.type === 'hitDisallowedStatus') {
+              // This requires status data in attack meta; we use a hint if present.
+              const statuses = Array.isArray(rule.statuses)
+                ? rule.statuses.map(String)
+                : [];
+              if (!statuses.length) return;
+
+              const status =
+                (a.meta && a.meta.targetStatus) ||
+                (a.meta && a.meta.defenderStatus) ||
+                null;
+              if (status && statuses.includes(String(status))) {
+                violated.push(rule);
+              }
+            }
+          });
+
+          if (violated.length) {
+            violations.push({
+              attack: a,
+              rulesViolated: violated,
+            });
+          }
+        });
+
+        // Sort newest first
+        violations.sort(
+          (a, b) => (b.attack.startedAt || 0) - (a.attack.startedAt || 0)
+        );
+        return violations;
+      },
+    };
+
+    // -----------------------------
     // RETALIATION HELPER
     // ----------------------------
 
@@ -1762,7 +2334,21 @@
       if (OdinsSpear._syncTimer) clearInterval(OdinsSpear._syncTimer);
 
       OdinsSpear._syncTimer = setInterval(() => {
-        const idleMs = nowMs() - lastActivity;
+        const now = nowMs();
+        const idleMs = now - lastActivity;
+
+        // Auto turn off chain watch after ~4 minutes idle
+        try {
+          if (idleMs >= 4 * 60_000 && WatchersService.isMeActive()) {
+            WatchersService.setStatus(false, {
+              reason: 'autoIdle',
+              idleMs,
+            }).catch((e) => log('autoIdle watcher off failed', e));
+          }
+        } catch (e) {
+          log('autoIdle watcher check failed', e);
+        }
+
         const usingInactive = idleMs > 5 * 60_000;
         if (usingInactive) {
           const sinceIntervalStart = idleMs % inactiveMs;
@@ -1783,6 +2369,7 @@
         OdinsSpear.warConfig = LocalCache.loadWarConfig();
         OdinsSpear.watchers = LocalCache.loadWatchers();
         OdinsSpear.watchersLog = LocalCache.loadWatchersLog();
+        OdinsSpear.attacks = LocalCache.loadAttackLog();
 
         emit(CONFIG.EVENTS.CLAIMS_INIT, { claims: OdinsSpear.claims });
         emit(CONFIG.EVENTS.NOTES_INIT, { notesById: OdinsSpear.notesById });
@@ -1791,6 +2378,7 @@
         emit(CONFIG.EVENTS.WATCHERS_LOG_INIT, {
           watchersLog: OdinsSpear.watchersLog,
         });
+        emit(CONFIG.EVENTS.ATTACK_LOG_INIT, { attacks: OdinsSpear.attacks });
 
         syncBundleOnce('boot');
         attachActivityTracking();
@@ -1816,6 +2404,8 @@
     OdinsSpear.notesService = NotesService;
     OdinsSpear.warService = WarService;
     OdinsSpear.watchersService = WatchersService;
+    OdinsSpear.attackLogService = AttackLogService;
+    OdinsSpear.unauthorizedService = UnauthorizedAttackService;
     OdinsSpear.retalService = RetalService;
     OdinsSpear.freki = FrekiBridge;
     OdinsSpear.config = CONFIG;
