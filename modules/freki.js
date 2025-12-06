@@ -2,7 +2,6 @@
 // Buckets fight data by myLevel / opponentLevel + chain + war flag,
 // uploads anonymised stats to Firebase, and exposes scoring helpers.
 //
-
 (function () {
   'use strict';
 
@@ -10,22 +9,27 @@
   window.OdinModules = window.OdinModules || [];
 
   window.OdinModules.push(function FrekiModuleInit(OdinContext) {
-    const state = OdinContext.getState();
-    const api = OdinContext.api;       // BaseModule._apiModule
-    const logic = OdinContext.logic;   // OdinLogic
+    // Bootstrap compatibility with OdinContext
+    const state =
+      OdinContext && typeof OdinContext.getState === 'function'
+        ? OdinContext.getState()
+        : OdinContext.state;
+    const api = OdinContext.api; // BaseModule._apiModule
+    const logic = OdinContext.logic; // OdinLogic
     const nexus = OdinContext.nexus;
 
     const FREKI_VERSION = 'v1';
     const FIREBASE_ROOT =
-      'https://torn-war-room-default-rtdb.firebaseio.com/freki/' + FREKI_VERSION;
+      'https://torn-war-room-default-rtdb.firebaseio.com/freki/' +
+      FREKI_VERSION;
 
     const Freki = {
       version: FREKI_VERSION,
-      clientId: null,          // hashed client ID
-      myUserId: null,          // Torn userId (not stored remotely)
-      myBuckets: {},           // this client's buckets (local aggregate)
-      buckets: {},             // merged buckets from all clients
-      lastAttackTs: 0,         // last processed attack timestamp
+      clientId: null, // client ID (UUID v4, not derived from userId)
+      myUserId: null, // Torn userId (not stored remotely)
+      myBuckets: {}, // this client's buckets (local aggregate)
+      buckets: {}, // merged buckets from all clients
+      lastAttackTs: 0, // last processed attack timestamp
       ready: false,
       syncInterval: null,
       refreshInterval: null,
@@ -33,14 +37,66 @@
 
     // ---------- Small helpers ----------
 
-    // Lightweight non-crypto hash so Freki doesnt  store raw IDs.
-    function fnv1aHash(str) {
-      let h = 0x811c9dc5;
-      for (let i = 0; i < str.length; i++) {
-        h ^= str.charCodeAt(i);
-        h = (h * 0x01000193) >>> 0;
+    /**
+     * Generate a RFC4122 UUID v4.
+     * Uses crypto.getRandomValues when available, falls back to Math.random.
+     */
+    function uuidv4() {
+      if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+        const buf = new Uint8Array(16);
+        crypto.getRandomValues(buf);
+
+        // Per RFC 4122 section 4.4
+        buf[6] = (buf[6] & 0x0f) | 0x40; // version 4
+        buf[8] = (buf[8] & 0x3f) | 0x80; // variant 10
+
+        const byteToHex = [];
+        for (let i = 0; i < 256; i++) {
+          byteToHex[i] = (i + 0x100).toString(16).substr(1);
+        }
+
+        return (
+          byteToHex[buf[0]] +
+          byteToHex[buf[1]] +
+          byteToHex[buf[2]] +
+          byteToHex[buf[3]] +
+          '-' +
+          byteToHex[buf[4]] +
+          byteToHex[buf[5]] +
+          '-' +
+          byteToHex[buf[6]] +
+          byteToHex[buf[7]] +
+          '-' +
+          byteToHex[buf[8]] +
+          byteToHex[buf[9]] +
+          '-' +
+          byteToHex[buf[10]] +
+          byteToHex[buf[11]] +
+          byteToHex[buf[12]] +
+          byteToHex[buf[13]] +
+          byteToHex[buf[14]] +
+          byteToHex[buf[15]]
+        );
       }
-      return ('00000000' + h.toString(16)).slice(-8);
+
+      // Fallback – still reasonably unique, but without crypto
+      let timestamp = new Date().getTime();
+      if (
+        typeof performance !== 'undefined' &&
+        typeof performance.now === 'function'
+      ) {
+        timestamp += performance.now();
+      }
+
+      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(
+        /[xy]/g,
+        function (c) {
+          const r = (timestamp + Math.random() * 16) % 16 | 0;
+          timestamp = Math.floor(timestamp / 16);
+          const v = c === 'x' ? r : (r & 0x3) | 0x8;
+          return v.toString(16);
+        },
+      );
     }
 
     function levelBucket(level) {
@@ -81,13 +137,7 @@
     }
 
     function updateLocalBucket(bucketKey, payload) {
-      const {
-        respect = 0,
-        energy = 25,
-        win = true,
-        ts = 0,
-      } = payload || {};
-
+      const { respect = 0, energy = 25, win = true, ts = 0 } = payload || {};
       let b = Freki.myBuckets[bucketKey];
       if (!b) {
         b = Freki.myBuckets[bucketKey] = {
@@ -99,7 +149,6 @@
           last_ts: 0,
         };
       }
-
       b.count += 1;
       if (win) b.win_count += 1;
       else b.loss_count += 1;
@@ -110,20 +159,16 @@
 
     function mergeClientBuckets(clientsNode) {
       const merged = {};
-
       if (!clientsNode || typeof clientsNode !== 'object') {
         return merged;
       }
-
       for (const clientId in clientsNode) {
         const client = clientsNode[clientId];
         if (!client || !client.buckets) continue;
         const buckets = client.buckets;
-
         for (const key in buckets) {
           const b = buckets[key];
           if (!b) continue;
-
           if (!merged[key]) {
             merged[key] = {
               count: 0,
@@ -137,9 +182,7 @@
               win_rate: 0,
             };
           }
-
           const m = merged[key];
-
           m.count += Number(b.count || 0);
           m.win_count += Number(b.win_count || 0);
           m.loss_count += Number(b.loss_count || 0);
@@ -148,13 +191,11 @@
           if (b.last_ts && b.last_ts > m.last_ts) m.last_ts = b.last_ts;
         }
       }
-
       for (const key in merged) {
         const m = merged[key];
         const cnt = Number(m.count) || 0;
         const totalRespect = Number(m.total_respect) || 0;
         const totalEnergy = Number(m.total_energy) || 0;
-
         if (cnt > 0) {
           m.avg_respect = totalRespect / cnt;
           m.win_rate = m.win_count / cnt;
@@ -162,7 +203,6 @@
           m.avg_respect = 0;
           m.win_rate = 0;
         }
-
         if (totalEnergy > 0) {
           m.avg_rpe = totalRespect / totalEnergy;
         } else if (cnt > 0) {
@@ -172,7 +212,6 @@
           m.avg_rpe = 0;
         }
       }
-
       return merged;
     }
 
@@ -184,10 +223,20 @@
 
     function getMyUserId() {
       if (logic && logic.user) {
-        return logic.user.player_id || logic.user.userID || logic.user.userid || null;
+        return (
+          logic.user.player_id ||
+          logic.user.userID ||
+          logic.user.userid ||
+          null
+        );
       }
       if (state && state.user) {
-        return state.user.player_id || state.user.userID || state.user.userid || null;
+        return (
+          state.user.player_id ||
+          state.user.userID ||
+          state.user.userid ||
+          null
+        );
       }
       return null;
     }
@@ -205,7 +254,11 @@
             if (res.status >= 200 && res.status < 300) {
               resolve();
             } else {
-              console.error('[FREKI] Firebase PUT error', res.status, res.responseText);
+              console.error(
+                '[FREKI] Firebase PUT error',
+                res.status,
+                res.responseText,
+              );
               reject(new Error('Firebase PUT error: ' + res.status));
             }
           },
@@ -231,11 +284,19 @@
                     : null;
                 resolve(data);
               } catch (e) {
-                console.error('[FREKI] Firebase GET parse error', e, res.responseText);
+                console.error(
+                  '[FREKI] Firebase GET parse error',
+                  e,
+                  res.responseText,
+                );
                 reject(e);
               }
             } else {
-              console.error('[FREKI] Firebase GET error', res.status, res.responseText);
+              console.error(
+                '[FREKI] Firebase GET error',
+                res.status,
+                res.responseText,
+              );
               reject(new Error('Firebase GET error: ' + res.status));
             }
           },
@@ -253,9 +314,8 @@
       try {
         if (!state.settings) state.settings = {};
 
-        // Determine / create a client ID (hashed user ID)
+        // Determine / create a client ID (UUID v4, not derived from userId)
         let userId = getMyUserId();
-
         if (!userId) {
           // Fallback: query the API once
           try {
@@ -271,14 +331,17 @@
         }
 
         if (!userId) {
-          console.warn('[FREKI] No userId, Freki will be disabled for this session.');
+          console.warn(
+            '[FREKI] No userId, Freki will be disabled for this session.',
+          );
           return;
         }
 
         Freki.myUserId = String(userId);
 
         if (!state.settings.frekiClientId) {
-          state.settings.frekiClientId = fnv1aHash('freki|' + userId);
+          // SECURITY: Use a random UUID v4 instead of a hash of userId
+          state.settings.frekiClientId = uuidv4();
           await state.saveToIDB();
         }
 
@@ -288,9 +351,13 @@
         Freki.myBuckets = state.settings.frekiBuckets || {};
         Freki.lastAttackTs = state.settings.frekiLastAttackTs || 0;
 
-        if (!Freki.lastAttackTs && Freki.myBuckets && Object.keys(Freki.myBuckets).length > 0) {
+        if (
+          !Freki.lastAttackTs &&
+          Freki.myBuckets &&
+          Object.keys(Freki.myBuckets).length > 0
+        ) {
           console.warn(
-            '[FREKI] lastAttackTs was reset but buckets not empty. Clearing local Freki buckets to avoid double counting.'
+            '[FREKI] lastAttackTs was reset but buckets not empty. Clearing local Freki buckets to avoid double counting.',
           );
           Freki.myBuckets = {};
           state.settings.frekiBuckets = {};
@@ -348,6 +415,7 @@
       const attacks = json.attacks;
       let maxTs = Freki.lastAttackTs || 0;
       let processed = 0;
+
       const myId = Freki.myUserId ? String(Freki.myUserId) : null;
       const myLevelFromState = getMyLevel();
 
@@ -358,8 +426,10 @@
         if (!atk) continue;
 
         const ts =
-          Number(atk.timestamp_ended || atk.timestamp || atk.timestamp_started) ||
-          0;
+          Number(
+            atk.timestamp_ended || atk.timestamp || atk.timestamp_started,
+          ) || 0;
+
         if (!ts || ts <= Freki.lastAttackTs) {
           continue; // already processed (or invalid)
         }
@@ -395,26 +465,29 @@
 
         // "War mode" from modifiers if present
         const isWar =
-          !!(atk.modifiers && (atk.modifiers.ranked_war || atk.modifiers.war));
+          !!(atk.modifiers &&
+            (atk.modifiers.ranked_war || atk.modifiers.war));
 
         // Attacker / defender levels
-        const atkLevel = Number(atk.attacker_level || atk.level_attacker) || null;
-        const defLevel = Number(atk.defender_level || atk.level_defender) || null;
+        const atkLevel =
+          Number(atk.attacker_level || atk.level_attacker) || null;
+        const defLevel =
+          Number(atk.defender_level || atk.level_defender) || null;
 
         // Attacker / defender IDs
         const attackerId = String(
           atk.attacker_id ||
-          atk.attacker ||
-          atk.attackerID ||
-          atk.attackerId ||
-          ''
+            atk.attacker ||
+            atk.attackerID ||
+            atk.attackerId ||
+            '',
         );
         const defenderId = String(
           atk.defender_id ||
-          atk.defender ||
-          atk.defenderID ||
-          atk.defenderId ||
-          ''
+            atk.defender ||
+            atk.defenderID ||
+            atk.defenderId ||
+            '',
         );
 
         let myLevel = myLevelFromState || null;
@@ -453,7 +526,6 @@
         if (!myLevel) myLevel = mySideLevel;
 
         let chainCount = 0;
-
         const candidates = [
           atk.chain,
           atk.chain_id,
@@ -462,7 +534,6 @@
           atk.chain_count,
           atk.modifiers && atk.modifiers.chain,
         ];
-
         for (const candidate of candidates) {
           const val = Number(candidate) || 0;
           if (val > 0 && val <= MAX_REASONABLE_CHAIN) {
@@ -473,7 +544,6 @@
 
         // A "win" is approximated by positive respect.
         const win = respect > 0;
-
         const bucketKey = getBucketKey(mySideLevel, oppLevel, chainCount, isWar);
 
         updateLocalBucket(bucketKey, {
@@ -510,7 +580,10 @@
       const clientsNode = await firebaseGet('clients');
       Freki.buckets = mergeClientBuckets(clientsNode);
       Freki.ready = true;
-      console.log('[FREKI] merged buckets keys:', Object.keys(Freki.buckets).length);
+      console.log(
+        '[FREKI] merged buckets keys:',
+        Object.keys(Freki.buckets).length,
+      );
     };
 
     // ---------- Public scoring API ----------
@@ -565,7 +638,12 @@
         .map((x) => x.t);
     };
 
-    Freki.getBucketStats = function getBucketStats(attackerLevel, opponentLevel, chainCount, isWar) {
+    Freki.getBucketStats = function getBucketStats(
+      attackerLevel,
+      opponentLevel,
+      chainCount,
+      isWar,
+    ) {
       const key = getBucketKey(attackerLevel, opponentLevel, chainCount, isWar);
       const b = Freki.buckets[key];
       if (!b) return null;
@@ -670,6 +748,7 @@
         isWar,
       };
     };
+
     window.Freki = Freki;
 
     // Kick it off
