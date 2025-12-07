@@ -23,24 +23,20 @@
     const SPEAR_VERSION = '1.0.0-odin';
 
     const CONFIG = {
-      VERSION: SPEAR_VERSION,
+  VERSION: SPEAR_VERSION,
 
-      // Backend HTTP gateways
-      API_GET_URL:
-        'https://torn-war-room-backend-559747349324.us-central1.run.app/spear/api',
-      API_POST_URL:
-        'https://torn-war-room-backend-559747349324.us-central1.run.app/spear/api',
+  // Backend HTTP gateways
+  API_GET_URL: 'https://us-central1-torn-war-room.cloudfunctions.net/api/spear/api',
+  API_POST_URL: 'https://us-central1-torn-war-room.cloudfunctions.net/api/spear/api',
 
-      // Bundle endpoint (claims + notes + warConfig + chain watchers)
-      API_BUNDLE_URL:
-        'https://torn-war-room-backend-559747349324.us-central1.run.app/spear/bundle',
+  // Bundle endpoint
+  API_BUNDLE_URL: 'https://us-central1-torn-war-room.cloudfunctions.net/api/spear/bundle',
 
-      FIREBASE: {
-        projectId: 'torn-war-room',
-        apiKey: 'AIzaSyAXIP665pJj4g9L9i-G-XVBrcJ0e5V4uw',
-        customTokenUrl:
-          'https://torn-war-room-backend-559747349324.us-central1.run.app/auth/issueauthtoken',
-      },
+  FIREBASE: {
+    projectId: 'torn-war-room',
+    apiKey: 'AIzaSyAXIP665pJj4g9L9i-G-XVBrcJ0e5V4uw',
+    customTokenUrl: 'https://us-central1-torn-war-room.cloudfunctions.net/api/auth/issueauthtoken',
+  },
 
       REFRESH: {
         ACTIVE_MS: 10_000,
