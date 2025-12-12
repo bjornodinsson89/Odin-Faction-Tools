@@ -256,15 +256,15 @@
       .odin-toggle-btn {
         position: fixed;
         z-index: 999998;
-        width: 48px;
-        height: 48px;
-        border-radius: 50%;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        width: 36px;
+        height: 36px;
+        border-radius: 5px;
+        background: #2eb872;
         border: none;
         color: white;
-        font-size: 24px;
+        font-size: 18px;
         cursor: pointer;
-        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
         transition: all 0.2s;
         display: flex;
         align-items: center;
@@ -272,8 +272,8 @@
       }
 
       .odin-toggle-btn:hover {
-        transform: scale(1.1);
-        box-shadow: 0 6px 16px rgba(102, 126, 234, 0.5);
+        background: #26a065;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
       }
 
       .odin-empty {
@@ -580,7 +580,7 @@
 
       buttonElement = document.createElement('button');
       buttonElement.className = 'odin-toggle-btn odin-menu-btn';
-      buttonElement.innerHTML = '🐺';
+      buttonElement.innerHTML = '<strong>OT</strong>';
       buttonElement.title = 'Odin Tools';
 
       // Position with responsive offset
@@ -737,10 +737,18 @@
           log('[UI Core] Render error:', e);
         }
       } else {
+        // Show default content based on the active tab
+        const tab = TABS.find(t => t.id === state.activeTab);
+        const tabName = tab ? tab.label : 'This Tab';
+        const tabIcon = tab ? tab.icon : '📋';
+        
         contentEl.innerHTML = `
           <div class="odin-empty">
-            <div class="odin-empty-icon">🔄</div>
-            <p>Loading...</p>
+            <div class="odin-empty-icon">${tabIcon}</div>
+            <p>${tabName} is initializing...</p>
+            <p style="font-size: 12px; color: #718096; margin-top: 8px;">
+              The ${tabName} module is loading. If this persists, the module may not be installed.
+            </p>
           </div>
         `;
       }
