@@ -256,15 +256,16 @@
       .odin-toggle-btn {
         position: fixed;
         z-index: 999998;
-        width: 36px;
-        height: 36px;
-        border-radius: 5px;
-        background: #2eb872;
-        border: none;
+        width: 54px;
+        height: 54px;
+        border-radius: 50%;
+        background: #00c896;
+        border: 2px solid rgba(0, 0, 0, 0.2);
         color: white;
-        font-size: 18px;
+        font-size: 14px;
+        font-weight: bold;
         cursor: pointer;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
         transition: all 0.2s;
         display: flex;
         align-items: center;
@@ -272,8 +273,9 @@
       }
 
       .odin-toggle-btn:hover {
-        background: #26a065;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+        background: #00b585;
+        box-shadow: 0 3px 8px rgba(0, 0, 0, 0.4);
+        transform: scale(1.05);
       }
 
       .odin-empty {
@@ -583,19 +585,11 @@
       buttonElement.innerHTML = '<strong>OT</strong>';
       buttonElement.title = 'Odin Tools';
 
-      // Position with responsive offset
-      const side = state.position.side || 'right';
-      const sideOffset = (window.innerWidth || 1024) < 600 ? 16 : 20;
-      buttonElement.style[side] = `${sideOffset}px`;
-      buttonElement.style.top = `${state.position.top || 100}px`;
+      // Position at bottom-left corner like Torn's chat buttons
+      buttonElement.style.left = '20px';
+      buttonElement.style.bottom = '20px';
 
       buttonElement.addEventListener('click', toggleOverlay);
-
-      // Make draggable
-      makeDraggable(buttonElement, (newPos) => {
-        state.position = newPos;
-        saveState();
-      });
 
       document.body.appendChild(buttonElement);
     }
@@ -714,9 +708,16 @@
 
     function renderContent() {
       const contentEl = document.getElementById('odin-content');
-      if (!contentEl) return;
+      if (!contentEl) {
+        log('[UI Core] Content element not found');
+        return;
+      }
 
       const renderer = tabRenderers.get(state.activeTab);
+      
+      log('[UI Core] Rendering tab:', state.activeTab, 'Renderer found:', !!renderer);
+      log('[UI Core] Registered tabs:', Array.from(tabRenderers.keys()));
+      
       if (renderer) {
         try {
           const content = renderer();
@@ -726,6 +727,7 @@
             contentEl.innerHTML = '';
             contentEl.appendChild(content);
           }
+          log('[UI Core] Tab content rendered successfully');
         } catch (e) {
           contentEl.innerHTML = `
             <div class="odin-empty">
@@ -737,17 +739,29 @@
           log('[UI Core] Render error:', e);
         }
       } else {
-        // Show default content based on the active tab
+        // Show informative default content
         const tab = TABS.find(t => t.id === state.activeTab);
         const tabName = tab ? tab.label : 'This Tab';
         const tabIcon = tab ? tab.icon : '📋';
+        const registeredCount = tabRenderers.size;
         
         contentEl.innerHTML = `
           <div class="odin-empty">
             <div class="odin-empty-icon">${tabIcon}</div>
-            <p>${tabName} is initializing...</p>
-            <p style="font-size: 12px; color: #718096; margin-top: 8px;">
-              The ${tabName} module is loading. If this persists, the module may not be installed.
+            <p style="font-size: 16px; font-weight: 600; margin-bottom: 8px;">${tabName}</p>
+            <p style="font-size: 13px; color: #a0aec0; margin-bottom: 16px;">
+              Module not loaded yet
+            </p>
+            <div style="background: rgba(255,255,255,0.05); padding: 12px; border-radius: 6px; font-size: 12px; text-align: left;">
+              <p style="margin-bottom: 8px;"><strong>Debug Info:</strong></p>
+              <p style="color: #718096; margin: 4px 0;">Active Tab: ${state.activeTab}</p>
+              <p style="color: #718096; margin: 4px 0;">Registered Modules: ${registeredCount}</p>
+              <p style="color: #718096; margin: 4px 0;">
+                Loaded: ${registeredCount > 0 ? Array.from(tabRenderers.keys()).join(', ') : 'none'}
+              </p>
+            </div>
+            <p style="font-size: 11px; color: #718096; margin-top: 16px;">
+              If this persists, check that the ${tabName} module script is installed and loaded after ui-core.js
             </p>
           </div>
         `;
