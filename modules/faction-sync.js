@@ -1,5 +1,5 @@
-// multiplayer-sync.js
-// Real-time Multiplayer Coordination Module
+// faction-sync.js
+// Real-time faction Coordination Module
 // Version: 4.0.0 - Complete implementation with Firestore sync
 
 (function () {
