@@ -1,6 +1,6 @@
 // odin-api-config.js
 // Unified API configuration and wrapper
-// Version: 3.1.0 - Torn API, TornStats, FFScouter integration
+// Version: 3.2.0 - TornStats/FFScouter endpoint fixes + GM XHR adapter
 
 (function () {
   'use strict';
@@ -13,7 +13,7 @@
     const log = ctx.log || console.log;
     const error = ctx.error || console.error;
 
-    const API_VERSION = '3.1.0';
+    const API_VERSION = '3.2.0';
 
     // ============================================
     // CONFIGURATION
@@ -33,7 +33,7 @@
         cacheTime: 300000, // 5 minutes cache
       },
       ffScouter: {
-        baseUrl: 'https://ffscouter.com/api',
+        baseUrl: 'https://ffscouter.com/api/v1',
         rateLimit: 20, // per minute
         minInterval: 3000, // 3 seconds between calls
         cacheTime: 600000, // 10 minutes cache
@@ -49,6 +49,7 @@
     // ============================================
     let tornApiKey = '';
     let tornStatsApiKey = '';
+    let ffScouterApiKey = '';
     let backendUrl = '';
 
     const requestCache = new Map();
@@ -123,6 +124,84 @@
       }
     }
 
+
+    // ============================================
+    // HTTP ADAPTER (prefers GM_xmlhttpRequest)
+    // ============================================
+    function hasGMRequest() {
+      return (
+        typeof GM_xmlhttpRequest === 'function' ||
+        (window.GM && typeof window.GM.xmlHttpRequest === 'function')
+      );
+    }
+
+    function gmRequest(options) {
+      const fn = typeof GM_xmlhttpRequest === 'function' ? GM_xmlhttpRequest : window.GM.xmlHttpRequest;
+      return fn(options);
+    }
+
+    async function requestJson(url, { method = 'GET', headers = {}, data = null, timeout = 30000 } = {}) {
+      if (hasGMRequest()) {
+        return await new Promise((resolve, reject) => {
+          try {
+            gmRequest({
+              url,
+              method,
+              headers,
+              data,
+              timeout,
+              responseType: 'json',
+              onload: (resp) => {
+                try {
+                  const status = resp.status || 0;
+                  let body = resp.response;
+                  if (body == null && resp.responseText) body = JSON.parse(resp.responseText);
+                  if (status >= 200 && status < 300) return resolve(body);
+                  const err = new Error(`HTTP ${status}`);
+                  err.status = status;
+                  err.body = body;
+                  return reject(err);
+                } catch (e) {
+                  return reject(e);
+                }
+              },
+              onerror: (resp) => {
+                const err = new Error(resp?.error || 'GM request failed');
+                err.status = resp?.status;
+                err.body = resp;
+                reject(err);
+              },
+              ontimeout: () => reject(new Error('Request timed out')),
+            });
+          } catch (e) {
+            reject(e);
+          }
+        });
+      }
+
+      const controller = new AbortController();
+      const t = setTimeout(() => controller.abort(), timeout);
+      try {
+        const resp = await fetch(url, { method, headers, body: data, signal: controller.signal });
+        const txt = await resp.text();
+        let body = null;
+        try {
+          body = txt ? JSON.parse(txt) : null;
+        } catch {
+          body = txt;
+        }
+        if (!resp.ok) {
+          const err = new Error(`HTTP ${resp.status}`);
+          err.status = resp.status;
+          err.body = body;
+          throw err;
+        }
+        return body;
+      } finally {
+        clearTimeout(t);
+      }
+    }
+
     // ============================================
     // TORN API
     // ============================================
@@ -149,9 +228,7 @@
       await waitForRateLimit('torn');
 
       try {
-        const response = await fetch(url);
-        const data = await response.json();
-
+        const data = await requestJson(url, { timeout: 30000 });
         // Handle Torn API errors
         if (data.error) {
           const err = new Error(data.error.error || 'Torn API error');
@@ -187,9 +264,7 @@
       await waitForRateLimit('torn');
 
       try {
-        const response = await fetch(url);
-        const data = await response.json();
-
+        const data = await requestJson(url, { timeout: 30000 });
         // Check for API errors
         if (data.error) {
           const errorMsg = data.error.error || 'Unknown API error';
@@ -227,7 +302,8 @@
       }
 
       const baseUrl = version === 'v1' ? CONFIG.tornStats.baseUrlV1 : CONFIG.tornStats.baseUrlV2;
-      const url = `${baseUrl}${endpoint}?key=${tornStatsApiKey}`;
+      const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+      const url = `${baseUrl}/${encodeURIComponent(tornStatsApiKey)}${cleanEndpoint}`;
 
       // Check cache
       const cacheKey = `ts:${endpoint}`;
@@ -240,8 +316,7 @@
       await waitForRateLimit('tornStats');
 
       try {
-        const response = await fetch(url);
-        const data = await response.json();
+        const data = await requestJson(url, { timeout: 30000 });
 
         if (data.error || data.status === 'error') {
           throw new Error(data.message || data.error || 'TornStats API error');
@@ -259,53 +334,99 @@
      * Get spy data from TornStats
      */
     async function tornStatsSpyGet(playerId) {
-      return tornStatsGet(`/spy/${playerId}`, 'v2');
+      return tornStatsGet(`/spy/user/${playerId}`, 'v2');
     }
 
     /**
      * Get faction roster from TornStats
      */
     async function tornStatsFactionGet(factionId) {
-      return tornStatsGet(`/faction/${factionId}`, 'v2');
+      return tornStatsGet(`/faction/roster`, 'v1');
     }
 
     // ============================================
     // FFSCOUTER API
     // ============================================
-    async function ffScouterGet(endpoint) {
-      const url = `${CONFIG.ffScouter.baseUrl}${endpoint}`;
-
-      // Check cache
-      const cacheKey = `ffs:${endpoint}`;
-      const cached = getCached(cacheKey, CONFIG.ffScouter.cacheTime);
-      if (cached) {
-        return cached;
-      }
-
-      // Rate limit
-      await waitForRateLimit('ffScouter');
-
-      try {
-        const response = await fetch(url);
-
-        if (!response.ok) {
-          throw new Error(`FFScouter HTTP ${response.status}`);
-        }
-
-        const data = await response.json();
-        setCache(cacheKey, data);
-        return data;
-      } catch (e) {
-        error('[API] FFScouter request failed:', e);
-        throw e;
-      }
+    function getFFScouterKey() {
+      return (ffScouterApiKey || tornApiKey || '').trim();
     }
 
-    /**
-     * Get player battle score from FFScouter
-     */
+    async function ffScouterGetStats(targets) {
+      const key = getFFScouterKey();
+      if (!key) throw new Error('FFScouter/Torn API key not set');
+
+      const ids = Array.isArray(targets) ? targets : [targets];
+      const idStr = ids.map(String).join(',');
+
+      const params = new URLSearchParams();
+      params.set('key', key);
+      params.set('targets', idStr);
+
+      const url = `${CONFIG.ffScouter.baseUrl}/get-stats?${params.toString()}`;
+
+      const cacheKey = `ffs:get-stats:${idStr}`;
+      const cached = getCached(cacheKey, CONFIG.ffScouter.cacheTime);
+      if (cached) return cached;
+
+      await waitForRateLimit('ffScouter');
+
+      const data = await requestJson(url, { timeout: 30000 });
+      setCache(cacheKey, data);
+      return data;
+    }
+
+    async function ffScouterGetTargets(filters = {}) {
+      const key = getFFScouterKey();
+      if (!key) throw new Error('FFScouter/Torn API key not set');
+
+      const params = new URLSearchParams();
+      params.set('key', key);
+      Object.entries(filters || {}).forEach(([k, v]) => {
+        if (v === undefined || v === null || v === '') return;
+        params.set(k, String(v));
+      });
+
+      const url = `${CONFIG.ffScouter.baseUrl}/get-targets?${params.toString()}`;
+
+      const cacheKey = `ffs:get-targets:${params.toString()}`;
+      const cached = getCached(cacheKey, CONFIG.ffScouter.cacheTime);
+      if (cached) return cached;
+
+      await waitForRateLimit('ffScouter');
+
+      const data = await requestJson(url, { timeout: 30000 });
+      setCache(cacheKey, data);
+      return data;
+    }
+
+    // Legacy compat: ffScouterGet('/player/{id}') etc.
+    async function ffScouterGet(endpoint) {
+      const playerMatch = String(endpoint || '').match(/^\/player\/(\d+)/);
+      if (playerMatch) return ffScouterPlayerGet(playerMatch[1]);
+
+      const key = getFFScouterKey();
+      const urlObj = new URL(`${CONFIG.ffScouter.baseUrl}${endpoint}`);
+      if (key && !urlObj.searchParams.has('key')) urlObj.searchParams.set('key', key);
+
+      const url = urlObj.toString();
+      const cacheKey = `ffs:raw:${url}`;
+      const cached = getCached(cacheKey, CONFIG.ffScouter.cacheTime);
+      if (cached) return cached;
+
+      await waitForRateLimit('ffScouter');
+
+      const data = await requestJson(url, { timeout: 30000 });
+      setCache(cacheKey, data);
+      return data;
+    }
+
     async function ffScouterPlayerGet(playerId) {
-      return ffScouterGet(`/player/${playerId}`);
+      const rows = await ffScouterGetStats(playerId);
+      if (Array.isArray(rows)) {
+        const row = rows.find((r) => String(r?.id) === String(playerId)) || rows[0];
+        return row || null;
+      }
+      return rows || null;
     }
 
     // ============================================
@@ -378,20 +499,26 @@
 
     function buildTornStatsUrl(endpoint, version = 'v2') {
       const baseUrl = version === 'v1' ? CONFIG.tornStats.baseUrlV1 : CONFIG.tornStats.baseUrlV2;
-      return `${baseUrl}${endpoint}?key=${tornStatsApiKey}`;
+      const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+      return `${baseUrl}/${encodeURIComponent(tornStatsApiKey)}${cleanEndpoint}`;
     }
 
     // ============================================
     // CONFIGURATION SETTERS
     // ============================================
     function setTornApiKey(key) {
-      tornApiKey = key;
+      tornApiKey = (key || '').trim();
       log('[API] Torn API key set');
     }
 
     function setTornStatsApiKey(key) {
-      tornStatsApiKey = key;
+      tornStatsApiKey = (key || '').trim();
       log('[API] TornStats API key set');
+    }
+
+    function setFFScouterApiKey(key) {
+      ffScouterApiKey = (key || '').trim();
+      log('[API] FFScouter API key set');
     }
 
     function setBackendUrl(url) {
@@ -430,7 +557,10 @@
       buildTornStatsUrl,
 
       // FFScouter API
+      setFFScouterApiKey,
       ffScouterGet,
+      ffScouterGetStats,
+      ffScouterGetTargets,
       ffScouterPlayerGet,
 
       // Backend API
@@ -481,6 +611,9 @@
         }
         if (settings.tornStatsApiKey) {
           setTornStatsApiKey(settings.tornStatsApiKey);
+        }
+        if (settings.ffScouterApiKey) {
+          setFFScouterApiKey(settings.ffScouterApiKey);
         }
       } catch (e) {
         log('[API Config] Could not load saved keys:', e);

@@ -1,6 +1,6 @@
 // freki.js
 // AI Target Scoring Engine with Self-Learning
-// Version: 3.1.0 - TornStats and FFScouter integrations intact
+// Version: 3.2.0 - Correct TornStats + FFScouter API usage
 
 (function () {
   'use strict';
@@ -16,7 +16,7 @@
     const log = ctx.log || console.log;
     const error = ctx.error || console.error;
 
-    const FREKI_VERSION = '3.1.0';
+    const FREKI_VERSION = '3.2.0';
     const RTDB_VERSION = 'v1';
 
     // ============================================
@@ -115,7 +115,7 @@
       if (!CONFIG.useTornStats) return null;
 
       const apiConfig = window.OdinApiConfig;
-      if (!apiConfig?.tornStatsGet) return null;
+      if (!apiConfig?.tornStatsSpyGet && !apiConfig?.tornStatsGet) return null;
 
       try {
         // Check cache first
@@ -126,16 +126,17 @@
         }
 
         // Fetch from TornStats spy endpoint
-        const data = await apiConfig.tornStatsGet(`/spy/${playerId}`);
+        const data = apiConfig.tornStatsSpyGet ? await apiConfig.tornStatsSpyGet(playerId) : await apiConfig.tornStatsGet(`/spy/user/${playerId}`);
 
         if (data && !data.error) {
+          const spy = data?.spy || data?.data?.spy || data?.result?.spy || data?.spydata || null;
           const result = {
             playerId,
-            total: data.spy?.total || data.total || null,
-            strength: data.spy?.strength || null,
-            defense: data.spy?.defense || null,
-            speed: data.spy?.speed || null,
-            dexterity: data.spy?.dexterity || null,
+            total: spy?.total ?? data?.total ?? null,
+            strength: spy?.strength ?? spy?.str ?? null,
+            defense: spy?.defense ?? spy?.def ?? null,
+            speed: spy?.speed ?? spy?.spd ?? null,
+            dexterity: spy?.dexterity ?? spy?.dex ?? null,
             source: 'tornstats',
             timestamp: Date.now(),
           };
@@ -157,7 +158,7 @@
       if (!CONFIG.useFFScouter) return null;
 
       const apiConfig = window.OdinApiConfig;
-      if (!apiConfig?.ffScouterGet) return null;
+      if (!apiConfig?.ffScouterGetStats && !apiConfig?.ffScouterGet) return null;
 
       try {
         // Check cache first
@@ -168,14 +169,19 @@
         }
 
         // Fetch from FFScouter
-        const data = await apiConfig.ffScouterGet(`/player/${playerId}`);
+        const data = apiConfig.ffScouterGetStats ? await apiConfig.ffScouterGetStats(playerId) : await apiConfig.ffScouterGet(`/player/${playerId}`);
 
-        if (data && data.battleScore) {
+        if (data) {
+          const row = Array.isArray(data)
+            ? (data.find((r) => String(r?.id) === String(playerId)) || data[0])
+            : data;
+
           const result = {
             playerId,
-            battleScore: data.battleScore,
-            estimatedStats: data.estimatedStats || null,
-            fairFightRange: data.fairFightRange || null,
+            battleScore: row?.fair_fight ?? row?.battleScore ?? null,
+            estimatedStats: row?.bs_estimate ?? row?.estimatedStats ?? null,
+            estimatedStatsHuman: row?.bs_estimate_human ?? null,
+            fairFightRange: row?.fair_fight_range ?? row?.fairFightRange ?? null,
             source: 'ffscouter',
             timestamp: Date.now(),
           };
