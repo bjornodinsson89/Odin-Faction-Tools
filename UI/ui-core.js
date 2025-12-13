@@ -1,6 +1,5 @@
 // ui-core.js
 // Core UI framework for Odin Tools
-// Author: BjornOdinsson89
 // Version: 3.1.0
 
 (function () {
