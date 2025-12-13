@@ -1,5 +1,6 @@
 // ui-core.js
 // Core UI framework for Odin Tools
+// Author: BjornOdinsson89
 // Version: 3.1.0
 
 (function () {
@@ -585,45 +586,245 @@
 
       const style = document.createElement('style');
       style.id = 'odin-styles';
-      style.textContent = STYLES;
+
+      style.textContent = STYLES + `
+        /* Odin mobile hardening */
+        #odin-toggle-btn,
+        .odin-toggle-btn {
+          z-index: 2147483647 !important;
+          position: fixed !important;
+          display: flex !important;
+          visibility: visible !important;
+          opacity: 0.98 !important;
+          pointer-events: auto !important;
+        }
+        #odin-overlay,
+        .odin-overlay {
+          z-index: 2147483646 !important;
+          position: fixed !important;
+          visibility: visible !important;
+          pointer-events: auto !important;
+        }
+      `;
       document.head.appendChild(style);
+    }
+
+
+    // ============================================
+    // VISIBILITY + PERSISTENCE GUARDS (MOBILE FIX)
+    // ============================================
+    let persistenceGuardsInstalled = false;
+    let domPersistenceObserver = null;
+
+    function installPersistenceGuards() {
+      if (persistenceGuardsInstalled) return;
+      persistenceGuardsInstalled = true;
+
+      const parent = document.body || document.documentElement;
+      if (!parent) return;
+
+      const onMutate = () => {
+        const p = document.body || document.documentElement;
+        if (!p) return;
+
+        // Re-inject styles if needed
+        if (!document.getElementById('odin-styles')) {
+          injectStyles();
+        }
+
+        // Re-attach toggle button / overlay if Torn replaces DOM nodes
+        if (buttonElement && !p.contains(buttonElement)) {
+          p.appendChild(buttonElement);
+        }
+        if (overlayElement && !p.contains(overlayElement)) {
+          p.appendChild(overlayElement);
+        }
+      };
+
+      domPersistenceObserver = new MutationObserver(() => onMutate());
+      domPersistenceObserver.observe(parent, { childList: true, subtree: true });
+
+      const onViewportChange = () => {
+        ensureToggleButtonVisible();
+        if (state.isOpen) ensureOverlayVisible();
+      };
+
+      window.addEventListener('resize', onViewportChange, { passive: true });
+      window.addEventListener('orientationchange', onViewportChange, { passive: true });
+
+      setTimeout(onViewportChange, 200);
+    }
+
+    function ensureToggleButtonVisible() {
+      if (!buttonElement) return;
+
+      // Force visibility in case external CSS meddles with it
+      buttonElement.style.display = 'flex';
+      buttonElement.style.visibility = 'visible';
+      if (!buttonElement.style.opacity) buttonElement.style.opacity = '0.98';
+
+      const vw = window.innerWidth || 0;
+      const vh = window.innerHeight || 0;
+      if (!vw || !vh) return;
+
+      const r = buttonElement.getBoundingClientRect();
+      const margin = 6;
+
+      // If it's off-screen (or clipped), reset to safe bottom-left.
+      const offscreen =
+        r.width === 0 ||
+        r.height === 0 ||
+        r.right < margin ||
+        r.bottom < margin ||
+        r.left > (vw - margin) ||
+        r.top > (vh - margin);
+
+      if (offscreen) {
+        buttonElement.style.left = '16px';
+        buttonElement.style.right = 'auto';
+        buttonElement.style.top = 'auto';
+        buttonElement.style.bottom = 'calc(16px + env(safe-area-inset-bottom, 0px))';
+      }
+    }
+
+    function ensureOverlayVisible() {
+      if (!overlayElement) return;
+
+      // Critical hardening
+      overlayElement.style.position = 'fixed';
+      overlayElement.style.zIndex = '2147483646';
+      overlayElement.style.visibility = 'visible';
+      overlayElement.style.pointerEvents = 'auto';
+
+      const vw = window.innerWidth || 0;
+      const vh = window.innerHeight || 0;
+      if (!vw || !vh) return;
+
+      // Clamp size (in case viewport changed, especially on mobile)
+      const maxWidth = Math.max(280, vw - 24);
+      const maxHeight = Math.max(320, vh - 24);
+
+      const currentW = overlayElement.getBoundingClientRect().width || parseFloat(overlayElement.style.width) || initialWidth;
+      const currentH = overlayElement.getBoundingClientRect().height || parseFloat(overlayElement.style.height) || initialHeight;
+
+      const nextW = Math.min(currentW, maxWidth);
+      const nextH = Math.min(currentH, maxHeight);
+
+      overlayElement.style.width = `${nextW}px`;
+      overlayElement.style.height = `${nextH}px`;
+
+      // Clamp position
+      const r = overlayElement.getBoundingClientRect();
+      const pad = 8;
+
+      let left = r.left;
+      let top = r.top;
+
+      // Convert right-based placement to left-based for clamping
+      if (!Number.isFinite(left)) left = pad;
+      if (!Number.isFinite(top)) top = pad;
+
+      if (left < pad) left = pad;
+      if (top < pad) top = pad;
+
+      if (left + r.width > vw - pad) left = Math.max(pad, vw - r.width - pad);
+      if (top + r.height > vh - pad) top = Math.max(pad, vh - r.height - pad);
+
+      overlayElement.style.left = `${left}px`;
+      overlayElement.style.right = 'auto';
+      overlayElement.style.top = `${top}px`;
     }
 
     // PART 1: UPDATED TOGGLE BUTTON WITH RESPONSIVE POSITIONING
     function createToggleButton() {
       if (buttonElement) return;
 
+      // Ensure styles are injected, but do not rely on them for visibility.
+      injectStyles();
+
       buttonElement = document.createElement('button');
       buttonElement.className = 'odin-toggle-btn odin-menu-btn';
+      buttonElement.id = 'odin-toggle-btn';
       buttonElement.innerHTML = `
         <div class="odin-toggle-btn-icon">🐺</div>
         <div class="odin-toggle-btn-text">ODIN</div>
       `;
       buttonElement.title = 'Odin Tools';
 
-      // Position at bottom-left corner like Torn's chat buttons
-      buttonElement.style.left = '16px';
-      buttonElement.style.bottom = '16px';
+      // Inline styles as a hard fallback in case site CSS or style injection interferes.
+      // Also uses safe-area inset for mobile devices (iOS/Android gesture bars).
+      buttonElement.style.cssText = `
+        position: fixed !important;
+        left: 16px !important;
+        right: auto !important;
+        top: auto !important;
+        bottom: calc(16px + env(safe-area-inset-bottom, 0px)) !important;
+        z-index: 2147483647 !important;
+        width: 60px !important;
+        height: 60px !important;
+        border-radius: 12px !important;
+        background: linear-gradient(135deg, #00c896 0%, #00b585 100%) !important;
+        border: none !important;
+        color: #ffffff !important;
+        font-size: 11px !important;
+        font-weight: 600 !important;
+        cursor: pointer !important;
+        box-shadow: 0 3px 8px rgba(0, 0, 0, 0.25) !important;
+        transition: all 0.2s ease !important;
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: center !important;
+        justify-content: center !important;
+        gap: 2px !important;
+        opacity: 0.98 !important;
+        pointer-events: auto !important;
+      `;
 
-      buttonElement.addEventListener('click', toggleOverlay);
+      buttonElement.addEventListener('click', () => {
+        try {
+          toggleOverlay();
+        } catch (e) {
+          log('[UI Core] Toggle button click error:', e);
+        }
+      });
 
-      document.body.appendChild(buttonElement);
+      // Append to DOM (body if available, otherwise html).
+      const parent = document.body || document.documentElement;
+      parent.appendChild(buttonElement);
+
+      // Ensure it stays present even if Torn dynamically replaces DOM sections.
+      installPersistenceGuards();
+
+      // Ensure it's on-screen.
+      setTimeout(() => {
+        ensureToggleButtonVisible();
+      }, 0);
     }
 
     // PART 1: UPDATED OVERLAY WITH RESPONSIVE SIZING
     function createOverlay() {
       if (overlayElement) return;
 
+      // Ensure styles are injected, but do not rely on them for positioning/z-index.
+      injectStyles();
+
       overlayElement = document.createElement('div');
       overlayElement.className = 'odin-overlay';
       overlayElement.id = 'odin-overlay';
+
+      // Hard fallback styles (critical for visibility on mobile / CSP / style conflicts).
+      overlayElement.style.position = 'fixed';
+      overlayElement.style.zIndex = '2147483646';
+      overlayElement.style.display = 'none';
+      overlayElement.style.flexDirection = 'column';
+      overlayElement.style.pointerEvents = 'auto';
 
       // Size and position with viewport awareness
       const viewportW = window.innerWidth || 1024;
       const viewportH = window.innerHeight || 768;
 
-      const maxWidth = Math.max(280, viewportW - 40);
-      const maxHeight = Math.max(320, viewportH - 80);
+      const maxWidth = Math.max(280, viewportW - 24);
+      const maxHeight = Math.max(320, viewportH - 24);
 
       const width = Math.min(state.size.width || initialWidth, maxWidth);
       const height = Math.min(state.size.height || initialHeight, maxHeight);
@@ -633,10 +834,12 @@
 
       const side = state.position.side || 'right';
       const sideOffset = viewportW < 600 ? 12 : 80;
+      overlayElement.style.left = 'auto';
+      overlayElement.style.right = 'auto';
       overlayElement.style[side] = `${sideOffset}px`;
 
       const top = state.position.top || 100;
-      const maxTop = Math.max(20, viewportH - height - 20);
+      const maxTop = Math.max(12, viewportH - height - 12);
       overlayElement.style.top = `${Math.min(top, maxTop)}px`;
 
       // Header
@@ -669,30 +872,35 @@
       overlayElement.appendChild(tabs);
       overlayElement.appendChild(content);
 
-      // Event listeners
-      header.addEventListener('mousedown', (e) => {
-        if (e.target.id !== 'odin-close') {
-          startDrag(e, overlayElement);
-        }
-      });
+      // Close button
+      header.querySelector('#odin-close')?.addEventListener('click', () => toggleOverlay(false));
 
-      overlayElement.querySelector('#odin-close').addEventListener('click', () => {
-        toggleOverlay(false);
-      });
-
+      // Tab switching
       tabs.querySelectorAll('.odin-tab').forEach((tab) => {
         tab.addEventListener('click', () => {
+          tabs.querySelectorAll('.odin-tab').forEach((t) => t.classList.remove('active'));
+          tab.classList.add('active');
           setActiveTab(tab.dataset.tab);
         });
       });
 
-      document.body.appendChild(overlayElement);
+      const parent = document.body || document.documentElement;
+      parent.appendChild(overlayElement);
 
-      // Make resizable
+      // Keep overlay in DOM even if Torn replaces content.
+      installPersistenceGuards();
+
+      // Make draggable and resizable
+      makeDraggable(overlayElement, header);
       addResizeHandle(overlayElement);
 
       // Initial render
       renderContent();
+
+      // Ensure overlay stays within viewport on mobile.
+      setTimeout(() => {
+        ensureOverlayVisible();
+      }, 0);
     }
 
     function toggleOverlay(forceState) {
@@ -703,6 +911,9 @@
           createOverlay();
         }
         overlayElement.style.display = 'flex';
+        // Mobile hardening: keep overlay on-screen and the toggle button visible.
+        ensureOverlayVisible();
+        ensureToggleButtonVisible();
       } else if (overlayElement) {
         overlayElement.style.display = 'none';
       }
@@ -1160,6 +1371,24 @@
       injectStyles();
       createToggleButton();
 
+      // Install persistence + visibility guards early (helps on Torn mobile where DOM can be replaced).
+      installPersistenceGuards();
+
+      // Auto-open on small screens the first time so users can actually find the UI.
+      try {
+        const flags = storage.getJSON('odin_ui_flags') || {};
+        const isSmallViewport = (window.innerWidth || 0) < 700 || (window.innerHeight || 0) < 520;
+        if (isSmallViewport && !flags.uiAutoOpened) {
+          flags.uiAutoOpened = true;
+          storage.setJSON('odin_ui_flags', flags);
+          setTimeout(() => {
+            try { toggleOverlay(true); } catch (e) {}
+          }, 650);
+        }
+      } catch (e) {
+        // ignore
+      }
+
       // Expose globally
       window.OdinUI = OdinUI;
 
@@ -1189,6 +1418,12 @@
 
       const onboardingBackdrop = document.getElementById('odin-api-onboarding-backdrop');
       if (onboardingBackdrop) onboardingBackdrop.remove();
+
+      if (domPersistenceObserver) {
+        try { domPersistenceObserver.disconnect(); } catch (e) {}
+        domPersistenceObserver = null;
+      }
+      persistenceGuardsInstalled = false;
 
       window.OdinUI = null;
       log('[UI Core] Destroyed');
