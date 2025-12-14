@@ -36,6 +36,140 @@
     let buttonElement = null;
 
     // ============================================
+    // SHADOW DOM MOUNT (FAILSAFE UI INJECTION)
+    // ============================================
+    const UI_HOST_ID = 'odin-shadow-host';
+    const UI_MOUNT_ID = 'odin-shadow-mount';
+    const UI_STYLE_ID = 'odin-shadow-styles';
+    let uiHostEl = null;
+    let uiShadowRoot = null;
+    let uiMountEl = null;
+    let uiStyleEl = null;
+    let uiGuardObserver = null;
+    let uiGuardScheduled = false;
+
+    function _cssEscape(val) {
+      try {
+        if (window.CSS && typeof window.CSS.escape === 'function') return window.CSS.escape(String(val));
+      } catch (_) {}
+      return String(val).replace(/[^a-zA-Z0-9_-]/g, '\\$&');
+    }
+
+    function ensureUIMount() {
+      // Try to keep UI isolated and immune to site CSS/DOM churn.
+      try {
+        if (!uiHostEl || !uiHostEl.isConnected) {
+          uiHostEl = document.getElementById(UI_HOST_ID);
+        }
+        if (!uiHostEl) {
+          uiHostEl = document.createElement('div');
+          uiHostEl.id = UI_HOST_ID;
+          uiHostEl.style.cssText = 'position:fixed;left:0;top:0;width:0;height:0;z-index:2147483647;pointer-events:none;';
+          (document.documentElement || document.body || document).appendChild(uiHostEl);
+        }
+
+        // Shadow DOM preferred
+        uiShadowRoot = uiHostEl.shadowRoot;
+        if (!uiShadowRoot && typeof uiHostEl.attachShadow === 'function') {
+          uiShadowRoot = uiHostEl.attachShadow({ mode: 'open' });
+        }
+
+        if (uiShadowRoot) {
+          uiMountEl = uiShadowRoot.getElementById(UI_MOUNT_ID);
+          if (!uiMountEl) {
+            uiMountEl = document.createElement('div');
+            uiMountEl.id = UI_MOUNT_ID;
+            uiMountEl.style.cssText = 'position:fixed;left:0;top:0;width:0;height:0;pointer-events:none;';
+            uiShadowRoot.appendChild(uiMountEl);
+          }
+
+          uiStyleEl = uiShadowRoot.getElementById(UI_STYLE_ID);
+          if (!uiStyleEl) {
+            uiStyleEl = document.createElement('style');
+            uiStyleEl.id = UI_STYLE_ID;
+            uiStyleEl.textContent = STYLES;
+            uiShadowRoot.appendChild(uiStyleEl);
+          }
+
+          // Re-attach core UI nodes if they got detached
+          if (buttonElement && !buttonElement.isConnected) uiMountEl.appendChild(buttonElement);
+          if (overlayElement && !overlayElement.isConnected) uiMountEl.appendChild(overlayElement);
+        } else {
+          // No shadow support: fall back to normal document injection.
+          uiMountEl = null;
+          uiStyleEl = null;
+        }
+
+        startUIMountGuard();
+      } catch (e) {
+        // Never let UI injection break the rest of Odin.
+        log('[UI Core] ensureUIMount error:', e);
+      }
+    }
+
+    function startUIMountGuard() {
+      if (uiGuardObserver) return;
+      try {
+        uiGuardObserver = new MutationObserver(() => {
+          if (uiGuardScheduled) return;
+          uiGuardScheduled = true;
+          setTimeout(() => {
+            uiGuardScheduled = false;
+            if (!uiHostEl || !uiHostEl.isConnected) {
+              uiHostEl = null;
+              uiShadowRoot = null;
+              uiMountEl = null;
+              uiStyleEl = null;
+            }
+            ensureUIMount();
+          }, 50);
+        });
+        uiGuardObserver.observe(document.documentElement || document.body, { childList: true, subtree: false });
+      } catch (e) {
+        // Ignore observer failures
+      }
+    }
+
+    function getUIMount() {
+      ensureUIMount();
+      return uiMountEl || document.body || document.documentElement;
+    }
+
+    function appendToUIMount(el) {
+      const root = getUIMount();
+      try {
+        root.appendChild(el);
+      } catch (e) {
+        try {
+          (document.body || document.documentElement).appendChild(el);
+        } catch (_) {}
+      }
+      return el;
+    }
+
+    function uiGetById(id) {
+      ensureUIMount();
+      if (uiMountEl) {
+        return uiMountEl.querySelector('#' + _cssEscape(id));
+      }
+      return document.getElementById(id);
+    }
+
+    function removeUIMount() {
+      try {
+        if (uiGuardObserver) {
+          uiGuardObserver.disconnect();
+          uiGuardObserver = null;
+        }
+        if (uiHostEl && uiHostEl.isConnected) uiHostEl.remove();
+      } catch (_) {}
+      uiHostEl = null;
+      uiShadowRoot = null;
+      uiMountEl = null;
+      uiStyleEl = null;
+    }
+
+    // ============================================
     // TAB DEFINITIONS
     // ============================================
     const TABS = [
@@ -53,6 +187,19 @@
     // STYLES - PART 2: BUTTON STYLING
     // ============================================
     const STYLES = `
+      /* ShadowDOM mount safety */
+      #odin-shadow-mount {
+        position: fixed;
+        left: 0;
+        top: 0;
+        width: 0;
+        height: 0;
+        pointer-events: none;
+      }
+      .odin-toggle-btn, .odin-overlay, #odin-api-onboarding-backdrop, .odin-notification {
+        pointer-events: auto;
+      }
+
       .odin-overlay {
         position: fixed;
         z-index: 999999;
@@ -581,249 +728,104 @@
     }
 
     function injectStyles() {
-      if (document.getElementById('odin-styles')) return;
+      // In Shadow DOM mode, styles are injected by ensureUIMount().
+      ensureUIMount();
 
-      const style = document.createElement('style');
-      style.id = 'odin-styles';
+      // Fallback: if Shadow DOM not available, inject into <head>.
+      if (uiMountEl) return;
 
-      style.textContent = STYLES + `
-        /* Odin mobile hardening */
-        #odin-toggle-btn,
-        .odin-toggle-btn {
-          z-index: 2147483647 !important;
-          position: fixed !important;
-          display: flex !important;
-          visibility: visible !important;
-          opacity: 0.98 !important;
-          pointer-events: auto !important;
+      try {
+        if (document.getElementById('odin-styles')) return;
+        const style = document.createElement('style');
+        style.id = 'odin-styles';
+        style.textContent = STYLES;
+        if (document.head) {
+          document.head.appendChild(style);
+        } else {
+          // Head not ready yet — retry shortly.
+          setTimeout(() => {
+            try {
+              if (!document.getElementById('odin-styles') && document.head) document.head.appendChild(style);
+            } catch (_) {}
+          }, 250);
         }
-        #odin-overlay,
-        .odin-overlay {
-          z-index: 2147483646 !important;
-          position: fixed !important;
-          visibility: visible !important;
-          pointer-events: auto !important;
-        }
-      `;
-      document.head.appendChild(style);
-    }
-
-
-    // ============================================
-    // VISIBILITY + PERSISTENCE GUARDS (MOBILE FIX)
-    // ============================================
-    let persistenceGuardsInstalled = false;
-    let domPersistenceObserver = null;
-
-    function installPersistenceGuards() {
-      if (persistenceGuardsInstalled) return;
-      persistenceGuardsInstalled = true;
-
-      const parent = document.body || document.documentElement;
-      if (!parent) return;
-
-      const onMutate = () => {
-        const p = document.body || document.documentElement;
-        if (!p) return;
-
-        // Re-inject styles if needed
-        if (!document.getElementById('odin-styles')) {
-          injectStyles();
-        }
-
-        // Re-attach toggle button / overlay if Torn replaces DOM nodes
-        if (buttonElement && !p.contains(buttonElement)) {
-          p.appendChild(buttonElement);
-        }
-        if (overlayElement && !p.contains(overlayElement)) {
-          p.appendChild(overlayElement);
-        }
-      };
-
-      domPersistenceObserver = new MutationObserver(() => onMutate());
-      domPersistenceObserver.observe(parent, { childList: true, subtree: true });
-
-      const onViewportChange = () => {
-        ensureToggleButtonVisible();
-        if (state.isOpen) ensureOverlayVisible();
-      };
-
-      window.addEventListener('resize', onViewportChange, { passive: true });
-      window.addEventListener('orientationchange', onViewportChange, { passive: true });
-
-      setTimeout(onViewportChange, 200);
-    }
-
-    function ensureToggleButtonVisible() {
-      if (!buttonElement) return;
-
-      // Force visibility in case external CSS meddles with it
-      buttonElement.style.display = 'flex';
-      buttonElement.style.visibility = 'visible';
-      if (!buttonElement.style.opacity) buttonElement.style.opacity = '0.98';
-
-      const vw = window.innerWidth || 0;
-      const vh = window.innerHeight || 0;
-      if (!vw || !vh) return;
-
-      const r = buttonElement.getBoundingClientRect();
-      const margin = 6;
-
-      // If it's off-screen (or clipped), reset to safe bottom-left.
-      const offscreen =
-        r.width === 0 ||
-        r.height === 0 ||
-        r.right < margin ||
-        r.bottom < margin ||
-        r.left > (vw - margin) ||
-        r.top > (vh - margin);
-
-      if (offscreen) {
-        buttonElement.style.left = '16px';
-        buttonElement.style.right = 'auto';
-        buttonElement.style.top = 'auto';
-        buttonElement.style.bottom = 'calc(16px + env(safe-area-inset-bottom, 0px))';
+      } catch (e) {
+        log('[UI Core] injectStyles error:', e);
       }
-    }
-
-    function ensureOverlayVisible() {
-      if (!overlayElement) return;
-
-      // Critical hardening
-      overlayElement.style.position = 'fixed';
-      overlayElement.style.zIndex = '2147483646';
-      overlayElement.style.visibility = 'visible';
-      overlayElement.style.pointerEvents = 'auto';
-
-      const vw = window.innerWidth || 0;
-      const vh = window.innerHeight || 0;
-      if (!vw || !vh) return;
-
-      // Clamp size (in case viewport changed, especially on mobile)
-      const maxWidth = Math.max(280, vw - 24);
-      const maxHeight = Math.max(320, vh - 24);
-
-      const currentW = overlayElement.getBoundingClientRect().width || parseFloat(overlayElement.style.width) || initialWidth;
-      const currentH = overlayElement.getBoundingClientRect().height || parseFloat(overlayElement.style.height) || initialHeight;
-
-      const nextW = Math.min(currentW, maxWidth);
-      const nextH = Math.min(currentH, maxHeight);
-
-      overlayElement.style.width = `${nextW}px`;
-      overlayElement.style.height = `${nextH}px`;
-
-      // Clamp position
-      const r = overlayElement.getBoundingClientRect();
-      const pad = 8;
-
-      let left = r.left;
-      let top = r.top;
-
-      // Convert right-based placement to left-based for clamping
-      if (!Number.isFinite(left)) left = pad;
-      if (!Number.isFinite(top)) top = pad;
-
-      if (left < pad) left = pad;
-      if (top < pad) top = pad;
-
-      if (left + r.width > vw - pad) left = Math.max(pad, vw - r.width - pad);
-      if (top + r.height > vh - pad) top = Math.max(pad, vh - r.height - pad);
-
-      overlayElement.style.left = `${left}px`;
-      overlayElement.style.right = 'auto';
-      overlayElement.style.top = `${top}px`;
     }
 
     // PART 1: UPDATED TOGGLE BUTTON WITH RESPONSIVE POSITIONING
     function createToggleButton() {
       if (buttonElement) return;
 
-      // Ensure styles are injected, but do not rely on them for visibility.
-      injectStyles();
+      ensureUIMount();
 
       buttonElement = document.createElement('button');
       buttonElement.className = 'odin-toggle-btn odin-menu-btn';
-      buttonElement.id = 'odin-toggle-btn';
       buttonElement.innerHTML = `
         <div class="odin-toggle-btn-icon">🐺</div>
         <div class="odin-toggle-btn-text">ODIN</div>
       `;
       buttonElement.title = 'Odin Tools';
 
-      // Inline styles as a hard fallback in case site CSS or style injection interferes.
-      // Also uses safe-area inset for mobile devices (iOS/Android gesture bars).
-      buttonElement.style.cssText = `
-        position: fixed !important;
-        left: 16px !important;
-        right: auto !important;
-        top: auto !important;
-        bottom: calc(16px + env(safe-area-inset-bottom, 0px)) !important;
-        z-index: 2147483647 !important;
-        width: 60px !important;
-        height: 60px !important;
-        border-radius: 12px !important;
-        background: linear-gradient(135deg, #00c896 0%, #00b585 100%) !important;
-        border: none !important;
-        color: #ffffff !important;
-        font-size: 11px !important;
-        font-weight: 600 !important;
-        cursor: pointer !important;
-        box-shadow: 0 3px 8px rgba(0, 0, 0, 0.25) !important;
-        transition: all 0.2s ease !important;
-        display: flex !important;
-        flex-direction: column !important;
-        align-items: center !important;
-        justify-content: center !important;
-        gap: 2px !important;
-        opacity: 0.98 !important;
-        pointer-events: auto !important;
-      `;
+      // Essential inline styles (in case CSS injection is blocked/overridden)
+      buttonElement.style.position = 'fixed';
+      buttonElement.style.zIndex = '2147483647';
+      buttonElement.style.width = '60px';
+      buttonElement.style.height = '60px';
+      buttonElement.style.borderRadius = '12px';
+      buttonElement.style.border = 'none';
+      buttonElement.style.padding = '0';
+      buttonElement.style.margin = '0';
+      buttonElement.style.display = 'flex';
+      buttonElement.style.flexDirection = 'column';
+      buttonElement.style.alignItems = 'center';
+      buttonElement.style.justifyContent = 'center';
+      buttonElement.style.gap = '2px';
+      buttonElement.style.cursor = 'pointer';
+      buttonElement.style.boxShadow = '0 3px 8px rgba(0,0,0,0.25)';
+      buttonElement.style.color = '#fff';
+      buttonElement.style.fontFamily = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif";
+      buttonElement.style.background = 'linear-gradient(135deg, #00c896 0%, #00b585 100%)';
+      buttonElement.style.pointerEvents = 'auto';
 
-      buttonElement.addEventListener('click', () => {
-        try {
-          toggleOverlay();
-        } catch (e) {
-          log('[UI Core] Toggle button click error:', e);
-        }
-      });
+      // Position at bottom-left corner like Torn's chat buttons
+      buttonElement.style.left = '16px';
+      buttonElement.style.bottom = '16px';
 
-      // Append to DOM (body if available, otherwise html).
-      const parent = document.body || document.documentElement;
-      parent.appendChild(buttonElement);
+      buttonElement.addEventListener('click', toggleOverlay);
 
-      // Ensure it stays present even if Torn dynamically replaces DOM sections.
-      installPersistenceGuards();
-
-      // Ensure it's on-screen.
-      setTimeout(() => {
-        ensureToggleButtonVisible();
-      }, 0);
+      appendToUIMount(buttonElement);
     }
 
     // PART 1: UPDATED OVERLAY WITH RESPONSIVE SIZING
     function createOverlay() {
       if (overlayElement) return;
 
-      // Ensure styles are injected, but do not rely on them for positioning/z-index.
-      injectStyles();
+      ensureUIMount();
 
       overlayElement = document.createElement('div');
       overlayElement.className = 'odin-overlay';
       overlayElement.id = 'odin-overlay';
 
-      // Hard fallback styles (critical for visibility on mobile / CSP / style conflicts).
+      // Essential inline styles for visibility (in case CSS injection is blocked)
       overlayElement.style.position = 'fixed';
-      overlayElement.style.zIndex = '2147483646';
+      overlayElement.style.zIndex = '2147483647';
       overlayElement.style.display = 'none';
       overlayElement.style.flexDirection = 'column';
+      overlayElement.style.borderRadius = '12px';
+      overlayElement.style.overflow = 'hidden';
+      overlayElement.style.background = 'linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)';
+      overlayElement.style.color = '#e2e8f0';
+      overlayElement.style.boxShadow = '0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.1)';
       overlayElement.style.pointerEvents = 'auto';
 
       // Size and position with viewport awareness
       const viewportW = window.innerWidth || 1024;
       const viewportH = window.innerHeight || 768;
 
-      const maxWidth = Math.max(280, viewportW - 24);
-      const maxHeight = Math.max(320, viewportH - 24);
+      const maxWidth = Math.max(280, viewportW - 40);
+      const maxHeight = Math.max(320, viewportH - 80);
 
       const width = Math.min(state.size.width || initialWidth, maxWidth);
       const height = Math.min(state.size.height || initialHeight, maxHeight);
@@ -833,12 +835,10 @@
 
       const side = state.position.side || 'right';
       const sideOffset = viewportW < 600 ? 12 : 80;
-      overlayElement.style.left = 'auto';
-      overlayElement.style.right = 'auto';
       overlayElement.style[side] = `${sideOffset}px`;
 
       const top = state.position.top || 100;
-      const maxTop = Math.max(12, viewportH - height - 12);
+      const maxTop = Math.max(20, viewportH - height - 20);
       overlayElement.style.top = `${Math.min(top, maxTop)}px`;
 
       // Header
@@ -871,35 +871,30 @@
       overlayElement.appendChild(tabs);
       overlayElement.appendChild(content);
 
-      // Close button
-      header.querySelector('#odin-close')?.addEventListener('click', () => toggleOverlay(false));
+      // Event listeners
+      header.addEventListener('mousedown', (e) => {
+        if (e.target.id !== 'odin-close') {
+          startDrag(e, overlayElement);
+        }
+      });
 
-      // Tab switching
+      overlayElement.querySelector('#odin-close').addEventListener('click', () => {
+        toggleOverlay(false);
+      });
+
       tabs.querySelectorAll('.odin-tab').forEach((tab) => {
         tab.addEventListener('click', () => {
-          tabs.querySelectorAll('.odin-tab').forEach((t) => t.classList.remove('active'));
-          tab.classList.add('active');
           setActiveTab(tab.dataset.tab);
         });
       });
 
-      const parent = document.body || document.documentElement;
-      parent.appendChild(overlayElement);
+      appendToUIMount(overlayElement);
 
-      // Keep overlay in DOM even if Torn replaces content.
-      installPersistenceGuards();
-
-      // Make draggable and resizable
-      makeDraggable(overlayElement, header);
+      // Make resizable
       addResizeHandle(overlayElement);
 
       // Initial render
       renderContent();
-
-      // Ensure overlay stays within viewport on mobile.
-      setTimeout(() => {
-        ensureOverlayVisible();
-      }, 0);
     }
 
     function toggleOverlay(forceState) {
@@ -910,9 +905,6 @@
           createOverlay();
         }
         overlayElement.style.display = 'flex';
-        // Mobile hardening: keep overlay on-screen and the toggle button visible.
-        ensureOverlayVisible();
-        ensureToggleButtonVisible();
       } else if (overlayElement) {
         overlayElement.style.display = 'none';
       }
@@ -1116,389 +1108,129 @@
     // PART 3: API KEY ONBOARDING MODAL
     // ============================================
     function renderApiOnboardingModal() {
-  // Prevent duplicates
-  if (document.getElementById('odin-api-onboarding-backdrop')) return;
+      ensureUIMount();
 
-  // Guard: if user already has a key, don't show
-  const currentSettings = getSettings();
-  if (currentSettings && currentSettings.tornApiKey) return;
+      // Avoid duplicate modals
+      const existing = uiGetById('odin-api-onboarding-backdrop');
+      if (existing) return;
+      // Create backdrop
+      const backdrop = document.createElement('div');
+      backdrop.id = 'odin-api-onboarding-backdrop';
+      backdrop.style.position = 'fixed';
+      backdrop.style.left = '0';
+      backdrop.style.top = '0';
+      backdrop.style.width = '100vw';
+      backdrop.style.height = '100vh';
+      backdrop.style.zIndex = '2147483647';
+      backdrop.style.display = 'flex';
+      backdrop.style.alignItems = 'center';
+      backdrop.style.justifyContent = 'center';
+      backdrop.style.background = 'rgba(0, 0, 0, 0.7)';
+      backdrop.style.backdropFilter = 'blur(2px)';
+      backdrop.style.pointerEvents = 'auto';
 
-  const Z = 2147483647;
+      // Create modal
+      const modal = document.createElement('div');
+      modal.className = 'odin-api-modal';
 
-  // ===========================
-  // Backdrop
-  // ===========================
-  const backdrop = document.createElement('div');
-  backdrop.id = 'odin-api-onboarding-backdrop';
-  backdrop.setAttribute('role', 'dialog');
-  backdrop.setAttribute('aria-modal', 'true');
+      // Header
+      const header = document.createElement('h2');
+      header.textContent = '🐺 Welcome to Odin Tools';
 
-  // Fully inline styles so it works even if CSS injection is blocked/overridden.
-  backdrop.style.position = 'fixed';
-  backdrop.style.top = '0';
-  backdrop.style.left = '0';
-  backdrop.style.right = '0';
-  backdrop.style.bottom = '0';
-  backdrop.style.background = 'rgba(0,0,0,0.72)';
-  backdrop.style.zIndex = String(Z);
-  backdrop.style.display = 'flex';
-  backdrop.style.alignItems = 'center';
-  backdrop.style.justifyContent = 'center';
-  backdrop.style.padding = '12px';
-  backdrop.style.pointerEvents = 'auto';
+      // Body with disclaimer
+      const body = document.createElement('div');
+      body.className = 'odin-api-modal-body';
+      body.innerHTML = `
+        <p><strong>Odin Tools uses the official Torn API to enhance your faction coordination experience.</strong></p>
+        
+        <p><strong>What is the Torn API?</strong></p>
+        <p>The Torn API is designed as a read-only interface for fetching information about your Torn account (player, faction, etc.). It cannot be used to log in to your account, spend items, or perform in-game actions.</p>
+        
+        <p><strong>What Odin Tools does:</strong></p>
+        <ul>
+          <li>Uses your API key solely to fetch data needed for war tracking, chain watching, target information, and related game statistics</li>
+          <li>Stores your API key locally only, using the userscript's browser storage (Tampermonkey GM storage / local IndexedDB)</li>
+          <li>Sends only derived data (like aggregated war stats, chain logs, and watcher information) to Odin's backend databases—your API key is never transmitted to external servers</li>
+          <li>Respects Torn's API rules, including call limits and caching</li>
+        </ul>
+        
+        <p><strong>What Odin Tools will NEVER do:</strong></p>
+        <ul>
+          <li>Ask for your Torn password, email, or 2FA codes</li>
+          <li>Send your API key to external databases or third-party servers</li>
+          <li>Use your API key to perform in-game actions</li>
+        </ul>
+        
+        <p><strong>Your Privacy & Security:</strong></p>
+        <p>Your Torn API key is stored locally only and is designed to remain private. You can revoke your API key at any time via Torn's official settings page. You may also create a dedicated custom key for Odin Tools with only the selections you want this tool to use, as allowed by Torn's API documentation.</p>
+        
+        <p><strong>Important Note:</strong></p>
+        <p>As with any third-party tool, you should only use Odin Tools if you're comfortable with how it accesses your data.</p>
+        
+        <p style="font-size: 11px; margin-top: 12px;">
+          For full details about Torn's API and access levels, please see the official documentation at 
+          <a href="https://www.torn.com/api.html" target="_blank" rel="noopener">https://www.torn.com/api.html</a>
+        </p>
+      `;
 
-  // Prevent scrolling behind the modal (mobile friendly)
-  const prevOverflow = document.documentElement.style.overflow;
-  document.documentElement.style.overflow = 'hidden';
+      // Input section
+      const inputSection = document.createElement('div');
+      inputSection.innerHTML = `
+        <div class="odin-api-input-row">
+          <label for="odin-api-key-input">
+            Torn API Key 
+            <span style="font-weight: normal; color: #a0aec0;">(Find in Torn → Settings → API Keys)</span>
+          </label>
+          <input 
+            type="text" 
+            id="odin-api-key-input" 
+            placeholder="Enter your Torn API key..."
+            autocomplete="off"
+          />
+          <div id="odin-api-status" class="odin-api-status"></div>
+        </div>
+      `;
 
-  // ===========================
-  // Modal shell
-  // ===========================
-  const modal = document.createElement('div');
-  modal.className = 'odin-api-modal';
-  modal.style.width = 'min(560px, 100%)';
-  modal.style.maxWidth = '560px';
-  modal.style.maxHeight = '88vh';
-  modal.style.overflow = 'auto';
-  modal.style.background = '#111827';
-  modal.style.color = '#e5e7eb';
-  modal.style.border = '1px solid rgba(255,255,255,0.14)';
-  modal.style.borderRadius = '14px';
-  modal.style.boxShadow = '0 16px 48px rgba(0,0,0,0.55)';
-  modal.style.fontFamily = '-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif';
-  modal.style.pointerEvents = 'auto';
+      // Footer with buttons
+      const footer = document.createElement('div');
+      footer.className = 'odin-api-modal-footer';
 
-  // ===========================
-  // Header
-  // ===========================
-  const header = document.createElement('div');
-  header.style.display = 'flex';
-  header.style.alignItems = 'center';
-  header.style.justifyContent = 'space-between';
-  header.style.gap = '10px';
-  header.style.padding = '12px 14px';
-  header.style.borderBottom = '1px solid rgba(255,255,255,0.10)';
+      const openApiPageBtn = helpers.createButton('Open Torn API Settings', {
+        variant: 'secondary',
+        onClick: () => {
+          window.open('https://www.torn.com/preferences.php#tab=api', '_blank', 'noopener');
+        },
+      });
 
-  const titleWrap = document.createElement('div');
-  titleWrap.style.display = 'flex';
-  titleWrap.style.flexDirection = 'column';
-  titleWrap.style.gap = '2px';
+      const validateBtn = helpers.createButton('Validate & Save', {
+        variant: 'primary',
+        onClick: handleValidateAndSave,
+      });
 
-  const title = document.createElement('div');
-  title.textContent = 'Set your Torn API Key';
-  title.style.fontSize = '16px';
-  title.style.fontWeight = '700';
-  title.style.letterSpacing = '0.2px';
+      footer.appendChild(openApiPageBtn);
+      footer.appendChild(validateBtn);
 
-  const subtitle = document.createElement('div');
-  subtitle.textContent = 'Required for profile/faction data, targets, war tools, and predictions.';
-  subtitle.style.fontSize = '12px';
-  subtitle.style.color = 'rgba(229,231,235,0.85)';
+      // Assemble modal
+      modal.appendChild(header);
+      modal.appendChild(body);
+      modal.appendChild(inputSection);
+      modal.appendChild(footer);
 
-  titleWrap.appendChild(title);
-  titleWrap.appendChild(subtitle);
+      backdrop.appendChild(modal);
+      appendToUIMount(backdrop);
 
-  const closeBtn = document.createElement('button');
-  closeBtn.type = 'button';
-  closeBtn.textContent = '✕';
-  closeBtn.setAttribute('aria-label', 'Close');
-  closeBtn.style.width = '34px';
-  closeBtn.style.height = '34px';
-  closeBtn.style.borderRadius = '10px';
-  closeBtn.style.border = '1px solid rgba(255,255,255,0.14)';
-  closeBtn.style.background = 'rgba(0,0,0,0.25)';
-  closeBtn.style.color = '#e5e7eb';
-  closeBtn.style.cursor = 'pointer';
-
-  header.appendChild(titleWrap);
-  header.appendChild(closeBtn);
-
-  // ===========================
-  // Body (disclaimer)
-  // ===========================
-  const body = document.createElement('div');
-  body.style.padding = '12px 14px';
-  body.style.fontSize = '12px';
-  body.style.lineHeight = '1.45';
-  body.style.color = 'rgba(229,231,235,0.92)';
-
-  const p1 = document.createElement('div');
-  p1.innerHTML = '<strong>What this key is used for</strong><br/>Odin uses your Torn API key to make read-only requests to Torn\'s official API endpoints so it can show your profile data, faction data, target info, and other features inside the Odin UI.';
-  p1.style.marginBottom = '10px';
-
-  const p2 = document.createElement('div');
-  p2.innerHTML = '<strong>How Odin stores your key</strong><br/>Your key is stored locally in your browser userscript storage (Odin settings). It is not automatically shared with other users.';
-  p2.style.marginBottom = '10px';
-
-  const p3 = document.createElement('div');
-  p3.innerHTML = '<strong>How your key is sent</strong><br/>Torn\'s API expects the key as a <code>key=</code> parameter on the request URL. That means it can appear in browser/network logs. Odin only sends it to Torn (and to TornStats only if you configure that separately in Settings).';
-  p3.style.marginBottom = '10px';
-
-  const p4 = document.createElement('div');
-  p4.innerHTML = '<strong>Security reminders</strong><ul style="margin:6px 0 0 18px; padding:0;"><li>Never share your API key in chat, screenshots, or streams.</li><li>If you think it\'s exposed, revoke/regenerate it in Torn immediately.</li><li>Only install Odin from a source you trust.</li></ul>';
-  p4.style.marginBottom = '10px';
-
-  const linkRow = document.createElement('div');
-  linkRow.style.marginTop = '6px';
-  linkRow.style.fontSize = '11px';
-  linkRow.style.opacity = '0.95';
-  linkRow.innerHTML = 'Create/manage keys on Torn: <a href="https://www.torn.com/api.html" target="_blank" rel="noopener" style="color:#93c5fd; text-decoration: underline;">torn.com/api.html</a>';
-
-  body.appendChild(p1);
-  body.appendChild(p2);
-  body.appendChild(p3);
-  body.appendChild(p4);
-  body.appendChild(linkRow);
-
-  // ===========================
-  // Input
-  // ===========================
-  const inputWrap = document.createElement('div');
-  inputWrap.style.padding = '0 14px 12px 14px';
-
-  const label = document.createElement('label');
-  label.textContent = 'Torn API Key';
-  label.setAttribute('for', 'odin-api-key-input');
-  label.style.display = 'block';
-  label.style.fontSize = '12px';
-  label.style.marginBottom = '6px';
-  label.style.color = 'rgba(229,231,235,0.9)';
-
-  const row = document.createElement('div');
-  row.style.display = 'flex';
-  row.style.gap = '8px';
-  row.style.alignItems = 'center';
-
-  const input = document.createElement('input');
-  input.type = 'password';
-  input.id = 'odin-api-key-input';
-  input.autocomplete = 'off';
-  input.inputMode = 'text';
-  input.placeholder = 'Paste your Torn API key here…';
-  input.style.flex = '1';
-  input.style.width = '100%';
-  input.style.padding = '10px 12px';
-  input.style.borderRadius = '10px';
-  input.style.border = '1px solid rgba(255,255,255,0.14)';
-  input.style.background = 'rgba(0,0,0,0.25)';
-  input.style.color = '#e5e7eb';
-  input.style.fontSize = '14px';
-  input.style.outline = 'none';
-  input.style.webkitTextFillColor = '#e5e7eb';
-
-  const revealBtn = document.createElement('button');
-  revealBtn.type = 'button';
-  revealBtn.textContent = 'Show';
-  revealBtn.style.padding = '10px 12px';
-  revealBtn.style.borderRadius = '10px';
-  revealBtn.style.border = '1px solid rgba(255,255,255,0.14)';
-  revealBtn.style.background = 'rgba(0,0,0,0.25)';
-  revealBtn.style.color = '#e5e7eb';
-  revealBtn.style.cursor = 'pointer';
-  revealBtn.style.whiteSpace = 'nowrap';
-
-  revealBtn.addEventListener('click', () => {
-    const isPw = input.type === 'password';
-    input.type = isPw ? 'text' : 'password';
-    revealBtn.textContent = isPw ? 'Hide' : 'Show';
-    try { input.focus(); } catch (e) {}
-  });
-
-  row.appendChild(input);
-  row.appendChild(revealBtn);
-
-  const statusEl = document.createElement('div');
-  statusEl.id = 'odin-api-status';
-  statusEl.style.marginTop = '8px';
-  statusEl.style.fontSize = '12px';
-  statusEl.style.minHeight = '18px';
-  statusEl.style.color = 'rgba(229,231,235,0.9)';
-
-  inputWrap.appendChild(label);
-  inputWrap.appendChild(row);
-  inputWrap.appendChild(statusEl);
-
-  // ===========================
-  // Footer (buttons)
-  // ===========================
-  const footer = document.createElement('div');
-  footer.style.display = 'flex';
-  footer.style.flexWrap = 'wrap';
-  footer.style.gap = '8px';
-  footer.style.justifyContent = 'flex-end';
-  footer.style.padding = '12px 14px';
-  footer.style.borderTop = '1px solid rgba(255,255,255,0.10)';
-
-  function styleBtn(btn, variant) {
-    btn.style.padding = '10px 12px';
-    btn.style.borderRadius = '10px';
-    btn.style.border = '1px solid rgba(255,255,255,0.14)';
-    btn.style.cursor = 'pointer';
-    btn.style.fontSize = '13px';
-    btn.style.fontWeight = '600';
-    btn.style.fontFamily = 'inherit';
-    btn.style.whiteSpace = 'nowrap';
-    if (variant === 'primary') {
-      btn.style.background = 'rgba(102,126,234,0.95)';
-      btn.style.color = '#0b1020';
-      btn.style.border = '1px solid rgba(102,126,234,0.95)';
-    } else if (variant === 'danger') {
-      btn.style.background = 'rgba(239,68,68,0.92)';
-      btn.style.color = '#0b1020';
-      btn.style.border = '1px solid rgba(239,68,68,0.92)';
-    } else {
-      btn.style.background = 'rgba(0,0,0,0.25)';
-      btn.style.color = '#e5e7eb';
-    }
-  }
-
-  const saveBtn = document.createElement('button');
-  saveBtn.type = 'button';
-  saveBtn.textContent = 'Validate & Save';
-  styleBtn(saveBtn, 'primary');
-
-  const skipBtn = document.createElement('button');
-  skipBtn.type = 'button';
-  skipBtn.textContent = 'Skip 7 days';
-  styleBtn(skipBtn, 'secondary');
-
-  const closeBtn2 = document.createElement('button');
-  closeBtn2.type = 'button';
-  closeBtn2.textContent = 'Close';
-  styleBtn(closeBtn2, 'secondary');
-
-  footer.appendChild(skipBtn);
-  footer.appendChild(closeBtn2);
-  footer.appendChild(saveBtn);
-
-  // ===========================
-  // Close helpers
-  // ===========================
-  function closeModal() {
-    try { document.documentElement.style.overflow = prevOverflow; } catch (e) {}
-    try { backdrop.remove(); } catch (e) {}
-  }
-
-  closeBtn.addEventListener('click', closeModal);
-  closeBtn2.addEventListener('click', closeModal);
-
-  // ESC closes (desktop)
-  function onKeyDown(e) {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      closeModal();
-    }
-  }
-  document.addEventListener('keydown', onKeyDown, true);
-
-  // Ensure keydown handler removed when closing
-  const originalClose = closeModal;
-  closeModal = function () {
-    try { document.removeEventListener('keydown', onKeyDown, true); } catch (e) {}
-    originalClose();
-  };
-
-  // Don't close on backdrop click (prevents accidental close on mobile taps)
-  // If you want this back later, we can add a toggle.
-
-  // ===========================
-  // Validation + Save
-  // ===========================
-  async function validateAndSave() {
-    const key = (input.value || '').trim();
-    statusEl.textContent = '';
-    statusEl.style.color = 'rgba(229,231,235,0.9)';
-
-    if (!key) {
-      statusEl.textContent = 'Please paste your Torn API key.';
-      statusEl.style.color = '#fca5a5';
-      return;
-    }
-    if (key.length < 10) {
-      statusEl.textContent = 'That key looks too short. Double-check you copied the full key.';
-      statusEl.style.color = '#fca5a5';
-      return;
-    }
-
-    saveBtn.disabled = true;
-    saveBtn.textContent = 'Validating…';
-    try {
-      // Set key in API module first so validation request uses it
-      if (ctx.api && typeof ctx.api.setTornApiKey === 'function') {
-        ctx.api.setTornApiKey(key);
-      }
-
-      // Validate by calling a simple Torn API endpoint (if available)
-      if (ctx.api && typeof ctx.api.getTornUser === 'function') {
-        await ctx.api.getTornUser('', ['basic']);
-      }
-
-      // Persist to settings
-      const s = getSettings();
-      const updated = {
-        ...s,
-        tornApiKey: key,
-        apiOnboardingDismissedUntil: 0,
-      };
-      saveSettings(updated);
-
-      // If Settings UI input is present, update it live
-      try {
-        const settingsInput = document.getElementById('setting-torn-api-key');
-        if (settingsInput) settingsInput.value = key;
-      } catch (e) {}
-
-      statusEl.textContent = 'Saved ✅  You can change/remove it anytime in Odin Settings.';
-      statusEl.style.color = '#86efac';
-
+      // Focus input
       setTimeout(() => {
-        closeModal();
-      }, 800);
-    } catch (e) {
-      const msg = (e && e.message) ? e.message : String(e);
-      statusEl.textContent = 'Could not validate the key. It may be invalid or blocked. Error: ' + msg;
-      statusEl.style.color = '#fca5a5';
-    } finally {
-      saveBtn.disabled = false;
-      saveBtn.textContent = 'Validate & Save';
+        document.getElementById('odin-api-key-input')?.focus();
+      }, 100);
+
+      // Handle Enter key
+      document.getElementById('odin-api-key-input')?.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+          handleValidateAndSave();
+        }
+      });
     }
-  }
-
-  saveBtn.addEventListener('click', validateAndSave);
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      validateAndSave();
-    }
-  });
-
-  skipBtn.addEventListener('click', () => {
-    try {
-      const s = getSettings();
-      const updated = {
-        ...s,
-        apiOnboardingDismissedUntil: Date.now() + 7 * 24 * 60 * 60 * 1000,
-      };
-      saveSettings(updated);
-    } catch (e) {}
-    closeModal();
-  });
-
-  // ===========================
-  // Compose
-  // ===========================
-  modal.appendChild(header);
-  modal.appendChild(body);
-  modal.appendChild(inputWrap);
-  modal.appendChild(footer);
-  backdrop.appendChild(modal);
-  document.body.appendChild(backdrop);
-
-  // Focus
-  setTimeout(() => {
-    try { input.focus(); } catch (e) {}
-  }, 120);
-}
 
     async function handleValidateAndSave() {
       const input = document.getElementById('odin-api-key-input');
@@ -1545,7 +1277,7 @@
 
         // Wait a moment for user to see success, then close modal
         setTimeout(() => {
-          const backdrop = document.getElementById('odin-api-onboarding-backdrop');
+          const backdrop = uiGetById('odin-api-onboarding-backdrop');
           if (backdrop) {
             backdrop.remove();
           }
@@ -1570,64 +1302,11 @@
       }
     }
 
-        function checkAndShowApiOnboarding() {
+    function checkAndShowApiOnboarding() {
       const settings = getSettings();
-
-      // If user snoozed onboarding, respect it until the timestamp expires
-      const dismissedUntil = Number(settings.apiOnboardingDismissedUntil || 0);
-      if (dismissedUntil && Date.now() < dismissedUntil) {
-        log('[UI Core] API onboarding snoozed until', new Date(dismissedUntil).toISOString());
-        return;
-      }
-function ensureApiKeyFloatingButton() {
-  try {
-    const settings = getSettings();
-    const dismissedUntil = Number(settings.apiOnboardingDismissedUntil || 0);
-    if (dismissedUntil && Date.now() < dismissedUntil) return;
-
-    if (settings.tornApiKey) {
-      const existing = document.getElementById('odin-api-fab');
-      if (existing) existing.remove();
-      return;
-    }
-
-    if (document.getElementById('odin-api-fab')) return;
-
-    const fab = document.createElement('button');
-    fab.id = 'odin-api-fab';
-    fab.type = 'button';
-    fab.textContent = '🔑 Set API Key';
-    fab.style.position = 'fixed';
-    fab.style.left = '12px';
-    fab.style.bottom = '12px';
-    fab.style.zIndex = '2147483647';
-    fab.style.padding = '10px 12px';
-    fab.style.borderRadius = '999px';
-    fab.style.border = '1px solid rgba(255,255,255,0.18)';
-    fab.style.background = 'rgba(102,126,234,0.95)';
-    fab.style.color = '#0b1020';
-    fab.style.fontFamily = '-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif';
-    fab.style.fontSize = '13px';
-    fab.style.fontWeight = '700';
-    fab.style.cursor = 'pointer';
-    fab.style.boxShadow = '0 10px 30px rgba(0,0,0,0.45)';
-    fab.style.pointerEvents = 'auto';
-
-    fab.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      try { renderApiOnboardingModal(); } catch (err) { log('[UI Core] Failed to open onboarding modal:', err); }
-    });
-
-    document.body.appendChild(fab);
-  } catch (e) {}
-}
-
+      
       // If no Torn API key exists, show the onboarding modal
       if (!settings.tornApiKey) {
-        // Avoid duplicates
-        if (document.getElementById('odin-api-onboarding-backdrop')) return;
-
         log('[UI Core] No API key found, showing onboarding modal');
         // Small delay to ensure DOM is ready
         setTimeout(renderApiOnboardingModal, 500);
@@ -1682,7 +1361,7 @@ function ensureApiKeyFloatingButton() {
           animation: slideIn 0.3s ease;
         `;
         notif.textContent = message;
-        document.body.appendChild(notif);
+        appendToUIMount(notif);
 
         setTimeout(() => {
           notif.remove();
@@ -1697,26 +1376,17 @@ function ensureApiKeyFloatingButton() {
       log('[UI Core] Initializing v' + UI_VERSION);
 
       loadState();
+      ensureUIMount();
       injectStyles();
       createToggleButton();
 
-      // Install persistence + visibility guards early (helps on Torn mobile where DOM can be replaced).
-      installPersistenceGuards();
-
-      // Auto-open on small screens the first time so users can actually find the UI.
-      try {
-        const flags = storage.getJSON('odin_ui_flags') || {};
-        const isSmallViewport = (window.innerWidth || 0) < 700 || (window.innerHeight || 0) < 520;
-        if (isSmallViewport && !flags.uiAutoOpened) {
-          flags.uiAutoOpened = true;
-          storage.setJSON('odin_ui_flags', flags);
-          setTimeout(() => {
-            try { toggleOverlay(true); } catch (e) {}
-          }, 650);
-        }
-      } catch (e) {
-        // ignore
-      }
+      // Failsafe: if Torn rebuilds DOM, re-attach the toggle button.
+      setTimeout(() => {
+        try {
+          ensureUIMount();
+          if (buttonElement && !buttonElement.isConnected) appendToUIMount(buttonElement);
+        } catch (_) {}
+      }, 750);
 
       // Expose globally
       window.OdinUI = OdinUI;
@@ -1727,8 +1397,7 @@ function ensureApiKeyFloatingButton() {
 
       // PART 3: Check for API key and show onboarding if needed
       checkAndShowApiOnboarding();
-          ensureApiKeyFloatingButton();
-}
+    }
 
     function destroy() {
       log('[UI Core] Destroying...');
@@ -1745,15 +1414,11 @@ function ensureApiKeyFloatingButton() {
 
       const styles = document.getElementById('odin-styles');
       if (styles) styles.remove();
+      // Shadow DOM styles are removed with the host
+      removeUIMount();
 
-      const onboardingBackdrop = document.getElementById('odin-api-onboarding-backdrop');
+      const onboardingBackdrop = uiGetById('odin-api-onboarding-backdrop');
       if (onboardingBackdrop) onboardingBackdrop.remove();
-
-      if (domPersistenceObserver) {
-        try { domPersistenceObserver.disconnect(); } catch (e) {}
-        domPersistenceObserver = null;
-      }
-      persistenceGuardsInstalled = false;
 
       window.OdinUI = null;
       log('[UI Core] Destroyed');
