@@ -1116,112 +1116,389 @@
     // PART 3: API KEY ONBOARDING MODAL
     // ============================================
     function renderApiOnboardingModal() {
-      // Create backdrop
-      const backdrop = document.createElement('div');
-      backdrop.id = 'odin-api-onboarding-backdrop';
+  // Prevent duplicates
+  if (document.getElementById('odin-api-onboarding-backdrop')) return;
 
-      // Create modal
-      const modal = document.createElement('div');
-      modal.className = 'odin-api-modal';
+  // Guard: if user already has a key, don't show
+  const currentSettings = getSettings();
+  if (currentSettings && currentSettings.tornApiKey) return;
 
-      // Header
-      const header = document.createElement('h2');
-      header.textContent = '🐺 Welcome to Odin Tools';
+  const Z = 2147483647;
 
-      // Body with disclaimer
-      const body = document.createElement('div');
-      body.className = 'odin-api-modal-body';
-      body.innerHTML = `
-        <p><strong>Odin Tools uses the official Torn API to enhance your faction coordination experience.</strong></p>
-        
-        <p><strong>What is the Torn API?</strong></p>
-        <p>The Torn API is designed as a read-only interface for fetching information about your Torn account (player, faction, etc.). It cannot be used to log in to your account, spend items, or perform in-game actions.</p>
-        
-        <p><strong>What Odin Tools does:</strong></p>
-        <ul>
-          <li>Uses your API key solely to fetch data needed for war tracking, chain watching, target information, and related game statistics</li>
-          <li>Stores your API key locally only, using the userscript's browser storage (Tampermonkey GM storage / local IndexedDB)</li>
-          <li>Sends only derived data (like aggregated war stats, chain logs, and watcher information) to Odin's backend databases—your API key is never transmitted to external servers</li>
-          <li>Respects Torn's API rules, including call limits and caching</li>
-        </ul>
-        
-        <p><strong>What Odin Tools will NEVER do:</strong></p>
-        <ul>
-          <li>Ask for your Torn password, email, or 2FA codes</li>
-          <li>Send your API key to external databases or third-party servers</li>
-          <li>Use your API key to perform in-game actions</li>
-        </ul>
-        
-        <p><strong>Your Privacy & Security:</strong></p>
-        <p>Your Torn API key is stored locally only and is designed to remain private. You can revoke your API key at any time via Torn's official settings page. You may also create a dedicated custom key for Odin Tools with only the selections you want this tool to use, as allowed by Torn's API documentation.</p>
-        
-        <p><strong>Important Note:</strong></p>
-        <p>As with any third-party tool, you should only use Odin Tools if you're comfortable with how it accesses your data.</p>
-        
-        <p style="font-size: 11px; margin-top: 12px;">
-          For full details about Torn's API and access levels, please see the official documentation at 
-          <a href="https://www.torn.com/api.html" target="_blank" rel="noopener">https://www.torn.com/api.html</a>
-        </p>
-      `;
+  // ===========================
+  // Backdrop
+  // ===========================
+  const backdrop = document.createElement('div');
+  backdrop.id = 'odin-api-onboarding-backdrop';
+  backdrop.setAttribute('role', 'dialog');
+  backdrop.setAttribute('aria-modal', 'true');
 
-      // Input section
-      const inputSection = document.createElement('div');
-      inputSection.innerHTML = `
-        <div class="odin-api-input-row">
-          <label for="odin-api-key-input">
-            Torn API Key 
-            <span style="font-weight: normal; color: #a0aec0;">(Find in Torn → Settings → API Keys)</span>
-          </label>
-          <input 
-            type="text" 
-            id="odin-api-key-input" 
-            placeholder="Enter your Torn API key..."
-            autocomplete="off"
-          />
-          <div id="odin-api-status" class="odin-api-status"></div>
-        </div>
-      `;
+  // Fully inline styles so it works even if CSS injection is blocked/overridden.
+  backdrop.style.position = 'fixed';
+  backdrop.style.top = '0';
+  backdrop.style.left = '0';
+  backdrop.style.right = '0';
+  backdrop.style.bottom = '0';
+  backdrop.style.background = 'rgba(0,0,0,0.72)';
+  backdrop.style.zIndex = String(Z);
+  backdrop.style.display = 'flex';
+  backdrop.style.alignItems = 'center';
+  backdrop.style.justifyContent = 'center';
+  backdrop.style.padding = '12px';
+  backdrop.style.pointerEvents = 'auto';
 
-      // Footer with buttons
-      const footer = document.createElement('div');
-      footer.className = 'odin-api-modal-footer';
+  // Prevent scrolling behind the modal (mobile friendly)
+  const prevOverflow = document.documentElement.style.overflow;
+  document.documentElement.style.overflow = 'hidden';
 
-      const openApiPageBtn = helpers.createButton('Open Torn API Settings', {
-        variant: 'secondary',
-        onClick: () => {
-          window.open('https://www.torn.com/preferences.php#tab=api', '_blank', 'noopener');
-        },
-      });
+  // ===========================
+  // Modal shell
+  // ===========================
+  const modal = document.createElement('div');
+  modal.className = 'odin-api-modal';
+  modal.style.width = 'min(560px, 100%)';
+  modal.style.maxWidth = '560px';
+  modal.style.maxHeight = '88vh';
+  modal.style.overflow = 'auto';
+  modal.style.background = '#111827';
+  modal.style.color = '#e5e7eb';
+  modal.style.border = '1px solid rgba(255,255,255,0.14)';
+  modal.style.borderRadius = '14px';
+  modal.style.boxShadow = '0 16px 48px rgba(0,0,0,0.55)';
+  modal.style.fontFamily = '-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif';
+  modal.style.pointerEvents = 'auto';
 
-      const validateBtn = helpers.createButton('Validate & Save', {
-        variant: 'primary',
-        onClick: handleValidateAndSave,
-      });
+  // ===========================
+  // Header
+  // ===========================
+  const header = document.createElement('div');
+  header.style.display = 'flex';
+  header.style.alignItems = 'center';
+  header.style.justifyContent = 'space-between';
+  header.style.gap = '10px';
+  header.style.padding = '12px 14px';
+  header.style.borderBottom = '1px solid rgba(255,255,255,0.10)';
 
-      footer.appendChild(openApiPageBtn);
-      footer.appendChild(validateBtn);
+  const titleWrap = document.createElement('div');
+  titleWrap.style.display = 'flex';
+  titleWrap.style.flexDirection = 'column';
+  titleWrap.style.gap = '2px';
 
-      // Assemble modal
-      modal.appendChild(header);
-      modal.appendChild(body);
-      modal.appendChild(inputSection);
-      modal.appendChild(footer);
+  const title = document.createElement('div');
+  title.textContent = 'Set your Torn API Key';
+  title.style.fontSize = '16px';
+  title.style.fontWeight = '700';
+  title.style.letterSpacing = '0.2px';
 
-      backdrop.appendChild(modal);
-      document.body.appendChild(backdrop);
+  const subtitle = document.createElement('div');
+  subtitle.textContent = 'Required for profile/faction data, targets, war tools, and predictions.';
+  subtitle.style.fontSize = '12px';
+  subtitle.style.color = 'rgba(229,231,235,0.85)';
 
-      // Focus input
-      setTimeout(() => {
-        document.getElementById('odin-api-key-input')?.focus();
-      }, 100);
+  titleWrap.appendChild(title);
+  titleWrap.appendChild(subtitle);
 
-      // Handle Enter key
-      document.getElementById('odin-api-key-input')?.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') {
-          handleValidateAndSave();
-        }
-      });
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.textContent = '✕';
+  closeBtn.setAttribute('aria-label', 'Close');
+  closeBtn.style.width = '34px';
+  closeBtn.style.height = '34px';
+  closeBtn.style.borderRadius = '10px';
+  closeBtn.style.border = '1px solid rgba(255,255,255,0.14)';
+  closeBtn.style.background = 'rgba(0,0,0,0.25)';
+  closeBtn.style.color = '#e5e7eb';
+  closeBtn.style.cursor = 'pointer';
+
+  header.appendChild(titleWrap);
+  header.appendChild(closeBtn);
+
+  // ===========================
+  // Body (disclaimer)
+  // ===========================
+  const body = document.createElement('div');
+  body.style.padding = '12px 14px';
+  body.style.fontSize = '12px';
+  body.style.lineHeight = '1.45';
+  body.style.color = 'rgba(229,231,235,0.92)';
+
+  const p1 = document.createElement('div');
+  p1.innerHTML = '<strong>What this key is used for</strong><br/>Odin uses your Torn API key to make read-only requests to Torn\'s official API endpoints so it can show your profile data, faction data, target info, and other features inside the Odin UI.';
+  p1.style.marginBottom = '10px';
+
+  const p2 = document.createElement('div');
+  p2.innerHTML = '<strong>How Odin stores your key</strong><br/>Your key is stored locally in your browser userscript storage (Odin settings). It is not automatically shared with other users.';
+  p2.style.marginBottom = '10px';
+
+  const p3 = document.createElement('div');
+  p3.innerHTML = '<strong>How your key is sent</strong><br/>Torn\'s API expects the key as a <code>key=</code> parameter on the request URL. That means it can appear in browser/network logs. Odin only sends it to Torn (and to TornStats only if you configure that separately in Settings).';
+  p3.style.marginBottom = '10px';
+
+  const p4 = document.createElement('div');
+  p4.innerHTML = '<strong>Security reminders</strong><ul style="margin:6px 0 0 18px; padding:0;"><li>Never share your API key in chat, screenshots, or streams.</li><li>If you think it\'s exposed, revoke/regenerate it in Torn immediately.</li><li>Only install Odin from a source you trust.</li></ul>';
+  p4.style.marginBottom = '10px';
+
+  const linkRow = document.createElement('div');
+  linkRow.style.marginTop = '6px';
+  linkRow.style.fontSize = '11px';
+  linkRow.style.opacity = '0.95';
+  linkRow.innerHTML = 'Create/manage keys on Torn: <a href="https://www.torn.com/api.html" target="_blank" rel="noopener" style="color:#93c5fd; text-decoration: underline;">torn.com/api.html</a>';
+
+  body.appendChild(p1);
+  body.appendChild(p2);
+  body.appendChild(p3);
+  body.appendChild(p4);
+  body.appendChild(linkRow);
+
+  // ===========================
+  // Input
+  // ===========================
+  const inputWrap = document.createElement('div');
+  inputWrap.style.padding = '0 14px 12px 14px';
+
+  const label = document.createElement('label');
+  label.textContent = 'Torn API Key';
+  label.setAttribute('for', 'odin-api-key-input');
+  label.style.display = 'block';
+  label.style.fontSize = '12px';
+  label.style.marginBottom = '6px';
+  label.style.color = 'rgba(229,231,235,0.9)';
+
+  const row = document.createElement('div');
+  row.style.display = 'flex';
+  row.style.gap = '8px';
+  row.style.alignItems = 'center';
+
+  const input = document.createElement('input');
+  input.type = 'password';
+  input.id = 'odin-api-key-input';
+  input.autocomplete = 'off';
+  input.inputMode = 'text';
+  input.placeholder = 'Paste your Torn API key here…';
+  input.style.flex = '1';
+  input.style.width = '100%';
+  input.style.padding = '10px 12px';
+  input.style.borderRadius = '10px';
+  input.style.border = '1px solid rgba(255,255,255,0.14)';
+  input.style.background = 'rgba(0,0,0,0.25)';
+  input.style.color = '#e5e7eb';
+  input.style.fontSize = '14px';
+  input.style.outline = 'none';
+  input.style.webkitTextFillColor = '#e5e7eb';
+
+  const revealBtn = document.createElement('button');
+  revealBtn.type = 'button';
+  revealBtn.textContent = 'Show';
+  revealBtn.style.padding = '10px 12px';
+  revealBtn.style.borderRadius = '10px';
+  revealBtn.style.border = '1px solid rgba(255,255,255,0.14)';
+  revealBtn.style.background = 'rgba(0,0,0,0.25)';
+  revealBtn.style.color = '#e5e7eb';
+  revealBtn.style.cursor = 'pointer';
+  revealBtn.style.whiteSpace = 'nowrap';
+
+  revealBtn.addEventListener('click', () => {
+    const isPw = input.type === 'password';
+    input.type = isPw ? 'text' : 'password';
+    revealBtn.textContent = isPw ? 'Hide' : 'Show';
+    try { input.focus(); } catch (e) {}
+  });
+
+  row.appendChild(input);
+  row.appendChild(revealBtn);
+
+  const statusEl = document.createElement('div');
+  statusEl.id = 'odin-api-status';
+  statusEl.style.marginTop = '8px';
+  statusEl.style.fontSize = '12px';
+  statusEl.style.minHeight = '18px';
+  statusEl.style.color = 'rgba(229,231,235,0.9)';
+
+  inputWrap.appendChild(label);
+  inputWrap.appendChild(row);
+  inputWrap.appendChild(statusEl);
+
+  // ===========================
+  // Footer (buttons)
+  // ===========================
+  const footer = document.createElement('div');
+  footer.style.display = 'flex';
+  footer.style.flexWrap = 'wrap';
+  footer.style.gap = '8px';
+  footer.style.justifyContent = 'flex-end';
+  footer.style.padding = '12px 14px';
+  footer.style.borderTop = '1px solid rgba(255,255,255,0.10)';
+
+  function styleBtn(btn, variant) {
+    btn.style.padding = '10px 12px';
+    btn.style.borderRadius = '10px';
+    btn.style.border = '1px solid rgba(255,255,255,0.14)';
+    btn.style.cursor = 'pointer';
+    btn.style.fontSize = '13px';
+    btn.style.fontWeight = '600';
+    btn.style.fontFamily = 'inherit';
+    btn.style.whiteSpace = 'nowrap';
+    if (variant === 'primary') {
+      btn.style.background = 'rgba(102,126,234,0.95)';
+      btn.style.color = '#0b1020';
+      btn.style.border = '1px solid rgba(102,126,234,0.95)';
+    } else if (variant === 'danger') {
+      btn.style.background = 'rgba(239,68,68,0.92)';
+      btn.style.color = '#0b1020';
+      btn.style.border = '1px solid rgba(239,68,68,0.92)';
+    } else {
+      btn.style.background = 'rgba(0,0,0,0.25)';
+      btn.style.color = '#e5e7eb';
     }
+  }
+
+  const saveBtn = document.createElement('button');
+  saveBtn.type = 'button';
+  saveBtn.textContent = 'Validate & Save';
+  styleBtn(saveBtn, 'primary');
+
+  const skipBtn = document.createElement('button');
+  skipBtn.type = 'button';
+  skipBtn.textContent = 'Skip 7 days';
+  styleBtn(skipBtn, 'secondary');
+
+  const closeBtn2 = document.createElement('button');
+  closeBtn2.type = 'button';
+  closeBtn2.textContent = 'Close';
+  styleBtn(closeBtn2, 'secondary');
+
+  footer.appendChild(skipBtn);
+  footer.appendChild(closeBtn2);
+  footer.appendChild(saveBtn);
+
+  // ===========================
+  // Close helpers
+  // ===========================
+  function closeModal() {
+    try { document.documentElement.style.overflow = prevOverflow; } catch (e) {}
+    try { backdrop.remove(); } catch (e) {}
+  }
+
+  closeBtn.addEventListener('click', closeModal);
+  closeBtn2.addEventListener('click', closeModal);
+
+  // ESC closes (desktop)
+  function onKeyDown(e) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeModal();
+    }
+  }
+  document.addEventListener('keydown', onKeyDown, true);
+
+  // Ensure keydown handler removed when closing
+  const originalClose = closeModal;
+  closeModal = function () {
+    try { document.removeEventListener('keydown', onKeyDown, true); } catch (e) {}
+    originalClose();
+  };
+
+  // Don't close on backdrop click (prevents accidental close on mobile taps)
+  // If you want this back later, we can add a toggle.
+
+  // ===========================
+  // Validation + Save
+  // ===========================
+  async function validateAndSave() {
+    const key = (input.value || '').trim();
+    statusEl.textContent = '';
+    statusEl.style.color = 'rgba(229,231,235,0.9)';
+
+    if (!key) {
+      statusEl.textContent = 'Please paste your Torn API key.';
+      statusEl.style.color = '#fca5a5';
+      return;
+    }
+    if (key.length < 10) {
+      statusEl.textContent = 'That key looks too short. Double-check you copied the full key.';
+      statusEl.style.color = '#fca5a5';
+      return;
+    }
+
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Validating…';
+    try {
+      // Set key in API module first so validation request uses it
+      if (ctx.api && typeof ctx.api.setTornApiKey === 'function') {
+        ctx.api.setTornApiKey(key);
+      }
+
+      // Validate by calling a simple Torn API endpoint (if available)
+      if (ctx.api && typeof ctx.api.getTornUser === 'function') {
+        await ctx.api.getTornUser('', ['basic']);
+      }
+
+      // Persist to settings
+      const s = getSettings();
+      const updated = {
+        ...s,
+        tornApiKey: key,
+        apiOnboardingDismissedUntil: 0,
+      };
+      saveSettings(updated);
+
+      // If Settings UI input is present, update it live
+      try {
+        const settingsInput = document.getElementById('setting-torn-api-key');
+        if (settingsInput) settingsInput.value = key;
+      } catch (e) {}
+
+      statusEl.textContent = 'Saved ✅  You can change/remove it anytime in Odin Settings.';
+      statusEl.style.color = '#86efac';
+
+      setTimeout(() => {
+        closeModal();
+      }, 800);
+    } catch (e) {
+      const msg = (e && e.message) ? e.message : String(e);
+      statusEl.textContent = 'Could not validate the key. It may be invalid or blocked. Error: ' + msg;
+      statusEl.style.color = '#fca5a5';
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Validate & Save';
+    }
+  }
+
+  saveBtn.addEventListener('click', validateAndSave);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      validateAndSave();
+    }
+  });
+
+  skipBtn.addEventListener('click', () => {
+    try {
+      const s = getSettings();
+      const updated = {
+        ...s,
+        apiOnboardingDismissedUntil: Date.now() + 7 * 24 * 60 * 60 * 1000,
+      };
+      saveSettings(updated);
+    } catch (e) {}
+    closeModal();
+  });
+
+  // ===========================
+  // Compose
+  // ===========================
+  modal.appendChild(header);
+  modal.appendChild(body);
+  modal.appendChild(inputWrap);
+  modal.appendChild(footer);
+  backdrop.appendChild(modal);
+  document.body.appendChild(backdrop);
+
+  // Focus
+  setTimeout(() => {
+    try { input.focus(); } catch (e) {}
+  }, 120);
+}
 
     async function handleValidateAndSave() {
       const input = document.getElementById('odin-api-key-input');
@@ -1293,11 +1570,64 @@
       }
     }
 
-    function checkAndShowApiOnboarding() {
+        function checkAndShowApiOnboarding() {
       const settings = getSettings();
-      
+
+      // If user snoozed onboarding, respect it until the timestamp expires
+      const dismissedUntil = Number(settings.apiOnboardingDismissedUntil || 0);
+      if (dismissedUntil && Date.now() < dismissedUntil) {
+        log('[UI Core] API onboarding snoozed until', new Date(dismissedUntil).toISOString());
+        return;
+      }
+function ensureApiKeyFloatingButton() {
+  try {
+    const settings = getSettings();
+    const dismissedUntil = Number(settings.apiOnboardingDismissedUntil || 0);
+    if (dismissedUntil && Date.now() < dismissedUntil) return;
+
+    if (settings.tornApiKey) {
+      const existing = document.getElementById('odin-api-fab');
+      if (existing) existing.remove();
+      return;
+    }
+
+    if (document.getElementById('odin-api-fab')) return;
+
+    const fab = document.createElement('button');
+    fab.id = 'odin-api-fab';
+    fab.type = 'button';
+    fab.textContent = '🔑 Set API Key';
+    fab.style.position = 'fixed';
+    fab.style.left = '12px';
+    fab.style.bottom = '12px';
+    fab.style.zIndex = '2147483647';
+    fab.style.padding = '10px 12px';
+    fab.style.borderRadius = '999px';
+    fab.style.border = '1px solid rgba(255,255,255,0.18)';
+    fab.style.background = 'rgba(102,126,234,0.95)';
+    fab.style.color = '#0b1020';
+    fab.style.fontFamily = '-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif';
+    fab.style.fontSize = '13px';
+    fab.style.fontWeight = '700';
+    fab.style.cursor = 'pointer';
+    fab.style.boxShadow = '0 10px 30px rgba(0,0,0,0.45)';
+    fab.style.pointerEvents = 'auto';
+
+    fab.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      try { renderApiOnboardingModal(); } catch (err) { log('[UI Core] Failed to open onboarding modal:', err); }
+    });
+
+    document.body.appendChild(fab);
+  } catch (e) {}
+}
+
       // If no Torn API key exists, show the onboarding modal
       if (!settings.tornApiKey) {
+        // Avoid duplicates
+        if (document.getElementById('odin-api-onboarding-backdrop')) return;
+
         log('[UI Core] No API key found, showing onboarding modal');
         // Small delay to ensure DOM is ready
         setTimeout(renderApiOnboardingModal, 500);
@@ -1397,7 +1727,8 @@
 
       // PART 3: Check for API key and show onboarding if needed
       checkAndShowApiOnboarding();
-    }
+          ensureApiKeyFloatingButton();
+}
 
     function destroy() {
       log('[UI Core] Destroying...');
