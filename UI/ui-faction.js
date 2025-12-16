@@ -1,6 +1,7 @@
 // ui-faction.js
-// Faction Dashboard UI (read-only)
-// Version: 3.1.0 - Full faction dashboard with FactionService integration
+// Faction Dashboard UI
+// Version: 3.1.0 - Full faction dashboard
+// Author: BjornOdinsson89
 
 (function () {
   'use strict';
@@ -16,7 +17,9 @@
     let sortColumn = 'position';
     let sortDirection = 'asc';
 
-    // ============================================
+    
+    let didAutoRefresh = false;
+// ============================================
     // RENDER FUNCTION
     // ============================================
     function renderFaction() {
@@ -29,6 +32,20 @@
       const members = spear?.FactionService?.getMembers() || [];
       const hasPermissionError = spear?.FactionService?.hasPermissionError();
       const lastError = spear?.FactionService?.getLastError();
+
+      const lastFetchedAuto = spear?.FactionService?.getLastFetched?.() || spear?.FactionService?.getLastFetched?.();
+      if (!didAutoRefresh && (!lastFetchedAuto || members.length === 0) && spear?.FactionService?.refreshFaction) {
+        didAutoRefresh = true;
+        setTimeout(async () => {
+          try {
+            await spear.FactionService.refreshFaction();
+          } catch (e) {
+            // ignore; UI will show state on next render
+          }
+          window.OdinUI?.refreshContent?.();
+        }, 0);
+      }
+
 
       // ============================================
       // ERROR STATE
