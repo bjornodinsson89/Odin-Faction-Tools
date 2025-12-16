@@ -1,8 +1,8 @@
 /**
  * Odin Tools - API Client Module
  * Handles all external API communications with rate limiting and caching
- * @version 3.1.0
- * @author BjornOdinsson89
+ * Version 3.1.0
+ * Author BjornOdinsson89
  */
 class OdinApi {
     constructor() {
