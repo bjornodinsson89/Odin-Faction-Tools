@@ -1,9 +1,8 @@
 /**
  * Odin Tools - Firebase Service Module
  * Handles all Firebase Realtime Database and Firestore operations
- * 
- * @version 3.1.0
- * @author Houston
+ * Version 3.1.0
+ * Author BjornOdinsson89 
  * @requires firebase (loaded via CDN in userscript)
  */
 
@@ -36,6 +35,140 @@ class FirebaseService {
             this.db = firebase.database();
             this.firestore = firebase.firestore();
             this.auth = firebase.auth();
+            // ========================================
+            // NETWORK DIAGNOSTICS (DB)
+            // ========================================
+            if (!window.__ODIN_NET_LOG__) window.__ODIN_NET_LOG__ = { api: [], db: [] };
+            const odinDbLog = (entry) => {
+                try {
+                    const log = window.__ODIN_NET_LOG__;
+                    if (!Array.isArray(log.db)) log.db = [];
+                    log.db.unshift(entry);
+                    if (log.db.length > 300) log.db.length = 300;
+                } catch (e) { /* ignore */ }
+            };
+
+            const wrapRtdbRef = (ref, path) => {
+                return new Proxy(ref, {
+                    get(target, prop) {
+                        const v = target[prop];
+                        if (typeof v === 'function' && ['set','update','transaction','once','push','remove'].includes(prop)) {
+                            return (...args) => {
+                                const t0 = performance.now();
+                                const entry = { ts: Date.now(), db: 'rtdb', op: String(prop), path: String(path || ''), ok: false, ms: 0 };
+                                odinDbLog(entry);
+                                try {
+                                    const p = v.apply(target, args);
+                                    if (p && typeof p.then === 'function') {
+                                        return p.then((res) => {
+                                            entry.ok = true;
+                                            entry.ms = Math.round(performance.now() - t0);
+                                            return res;
+                                        }).catch((err) => {
+                                            entry.ok = false;
+                                            entry.ms = Math.round(performance.now() - t0);
+                                            entry.error = (err && err.message) ? err.message : String(err);
+                                            throw err;
+                                        });
+                                    }
+                                    entry.ok = true;
+                                    entry.ms = Math.round(performance.now() - t0);
+                                    return p;
+                                } catch (err) {
+                                    entry.ok = false;
+                                    entry.ms = Math.round(performance.now() - t0);
+                                    entry.error = (err && err.message) ? err.message : String(err);
+                                    throw err;
+                                }
+                            };
+                        }
+                        if (typeof v === 'function') return v.bind(target);
+                        return v;
+                    }
+                });
+            };
+
+            const origDbRef = this.db.ref.bind(this.db);
+            this.db.ref = (path) => wrapRtdbRef(origDbRef(path), path);
+
+            const wrapFsDoc = (docRef, path) => {
+                return new Proxy(docRef, {
+                    get(target, prop) {
+                        const v = target[prop];
+                        if (typeof v === 'function' && ['set','update','get','delete'].includes(prop)) {
+                            return (...args) => {
+                                const t0 = performance.now();
+                                const entry = { ts: Date.now(), db: 'firestore', op: String(prop), path: String(path || ''), ok: false, ms: 0 };
+                                odinDbLog(entry);
+                                try {
+                                    const p = v.apply(target, args);
+                                    return p.then((res) => {
+                                        entry.ok = true;
+                                        entry.ms = Math.round(performance.now() - t0);
+                                        return res;
+                                    }).catch((err) => {
+                                        entry.ok = false;
+                                        entry.ms = Math.round(performance.now() - t0);
+                                        entry.error = (err && err.message) ? err.message : String(err);
+                                        throw err;
+                                    });
+                                } catch (err) {
+                                    entry.ok = false;
+                                    entry.ms = Math.round(performance.now() - t0);
+                                    entry.error = (err && err.message) ? err.message : String(err);
+                                    throw err;
+                                }
+                            };
+                        }
+                        if (typeof v === 'function') return v.bind(target);
+                        return v;
+                    }
+                });
+            };
+
+            const wrapFsCollection = (colRef, path) => {
+                return new Proxy(colRef, {
+                    get(target, prop) {
+                        const v = target[prop];
+                        if (prop === 'doc' && typeof v === 'function') {
+                            return (id) => {
+                                const d = v.call(target, id);
+                                const p = path + '/' + (id || '(auto)');
+                                return wrapFsDoc(d, p);
+                            };
+                        }
+                        if (prop === 'add' && typeof v === 'function') {
+                            return (...args) => {
+                                const t0 = performance.now();
+                                const entry = { ts: Date.now(), db: 'firestore', op: 'add', path: String(path || ''), ok: false, ms: 0 };
+                                odinDbLog(entry);
+                                try {
+                                    return v.apply(target, args).then((res) => {
+                                        entry.ok = true;
+                                        entry.ms = Math.round(performance.now() - t0);
+                                        return res;
+                                    }).catch((err) => {
+                                        entry.ok = false;
+                                        entry.ms = Math.round(performance.now() - t0);
+                                        entry.error = (err && err.message) ? err.message : String(err);
+                                        throw err;
+                                    });
+                                } catch (err) {
+                                    entry.ok = false;
+                                    entry.ms = Math.round(performance.now() - t0);
+                                    entry.error = (err && err.message) ? err.message : String(err);
+                                    throw err;
+                                }
+                            };
+                        }
+                        if (typeof v === 'function') return v.bind(target);
+                        return v;
+                    }
+                });
+            };
+
+            const origCollection = this.firestore.collection.bind(this.firestore);
+            this.firestore.collection = (name) => wrapFsCollection(origCollection(name), name);
 
             // Monitor connection status
             const connectedRef = this.db.ref('.info/connected');
