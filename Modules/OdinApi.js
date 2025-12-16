@@ -463,6 +463,33 @@ if (typeof window !== 'undefined') {
   if (!window.OdinModules) window.OdinModules = [];
 
   window.OdinModules.push(function OdinApiConfigModuleInit(OdinContext) {
+    // ============================================
+    // NETWORK DIAGNOSTICS (API)
+    // ============================================
+    if (!window.__ODIN_NET_LOG__) window.__ODIN_NET_LOG__ = { api: [], db: [] };
+    if (!window.OdinDiag) {
+      window.OdinDiag = {
+        log: function() {
+          try {
+            const args = Array.prototype.slice.call(arguments);
+            const msg = args.map(a => (a == null ? '' : String(a))).join(' ');
+            const log = window.__ODIN_NET_LOG__;
+            if (!log.misc) log.misc = [];
+            log.misc.unshift({ ts: Date.now(), msg: msg });
+            if (log.misc.length > 300) log.misc.length = 300;
+          } catch (e) { /* ignore */ }
+        }
+      };
+    }
+    function odinLogApi(entry) {
+      try {
+        const log = window.__ODIN_NET_LOG__;
+        if (!Array.isArray(log.api)) log.api = [];
+        log.api.unshift(entry);
+        if (log.api.length > 300) log.api.length = 300;
+      } catch (e) { /* ignore */ }
+    }
+
     const ctx = OdinContext || {};
     const storage = ctx.storage || { getJSON: () => null, setJSON: () => {} };
     const log = ctx.log || console.log;
@@ -604,6 +631,7 @@ async function tornGet(endpoint, selections = '') {
     stats.cacheHits++;
     stats.log.push({ ts: Date.now(), kind: 'torn', endpoint: ep, selections, cached: true, ok: true, ms: 0, url: urlV2, v: 'cache' });
     if (stats.log.length > 200) stats.log.splice(0, stats.log.length - 200);
+    odinLogApi({ ts: Date.now(), service: 'torn', method: 'GET', url: urlV2, endpoint: ep, selections: selections || '', cached: true, ok: true, ms: 0 });
     return cached;
   }
 
@@ -611,6 +639,8 @@ async function tornGet(endpoint, selections = '') {
     const t0 = performance.now();
     stats.totalCalls++;
     const entry = { ts: Date.now(), kind: 'torn', endpoint: ep, selections, cached: false, ok: false, ms: 0, url, v: versionLabel };
+    const netEntry = { ts: Date.now(), service: 'torn', method: 'GET', url: url, endpoint: ep, selections: selections || '', cached: false, ok: false, ms: 0 };
+    odinLogApi(netEntry);
     stats.log.push(entry);
     if (stats.log.length > 200) stats.log.splice(0, stats.log.length - 200);
 
@@ -627,12 +657,21 @@ async function tornGet(endpoint, selections = '') {
 
       entry.ok = true;
       stats.okCalls++;
+      if (entry.kind === 'ffscouter') { netEntry.ok = true; netEntry.ms = entry.ms; }
+      if (entry.kind === 'tornstats') { netEntry.ok = true; netEntry.ms = entry.ms; }
+      netEntry.ok = true;
+      netEntry.ms = entry.ms;
       setCache(cacheKey, data);
       window.OdinDiag?.log?.(`[API] Torn ${versionLabel} OK`, ep, selections ? `sel=${selections}` : '');
       return data;
     } catch (e) {
       entry.ms = Math.round(performance.now() - t0);
       stats.failCalls++;
+      if (entry.kind === 'ffscouter') { netEntry.ok = false; netEntry.ms = entry.ms; netEntry.error = (e && e.message) ? e.message : String(e); }
+      if (entry.kind === 'tornstats') { netEntry.ok = false; netEntry.ms = entry.ms; netEntry.error = (e && e.message) ? e.message : String(e); }
+      netEntry.ok = false;
+      netEntry.ms = entry.ms;
+      netEntry.error = (e && e.message) ? e.message : String(e);
       window.OdinDiag?.log?.(`[API] Torn ${versionLabel} FAIL`, ep, selections ? `sel=${selections}` : '', (e && e.message) ? e.message : String(e));
       throw e;
     }
