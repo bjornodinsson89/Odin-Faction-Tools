@@ -1,7 +1,7 @@
 // ui-faction.js
-// Faction Dashboard UI
-// Version: 3.1.0 - Full faction dashboard
-// Author: BjornOdinsson89
+// Faction Dashboard UI (read-only)
+// Version: 3.1.0
+// Author BjornOdinsson89
 
 (function () {
   'use strict';
@@ -16,10 +16,9 @@
     // Sort state
     let sortColumn = 'position';
     let sortDirection = 'asc';
+    let autoRefreshAttempted = false;
 
-    
-    let didAutoRefresh = false;
-// ============================================
+    // ============================================
     // RENDER FUNCTION
     // ============================================
     function renderFaction() {
@@ -30,22 +29,22 @@
       const container = document.createElement('div');
       const summary = spear?.FactionService?.getSummary();
       const members = spear?.FactionService?.getMembers() || [];
-      const hasPermissionError = spear?.FactionService?.hasPermissionError();
-      const lastError = spear?.FactionService?.getLastError();
 
-      const lastFetchedAuto = spear?.FactionService?.getLastFetched?.() || spear?.FactionService?.getLastFetched?.();
-      if (!didAutoRefresh && (!lastFetchedAuto || members.length === 0) && spear?.FactionService?.refreshFaction) {
-        didAutoRefresh = true;
-        setTimeout(async () => {
-          try {
-            await spear.FactionService.refreshFaction();
-          } catch (e) {
-            // ignore; UI will show state on next render
-          }
-          window.OdinUI?.refreshContent?.();
-        }, 0);
+      if (!autoRefreshAttempted) {
+        const hasData = summary && summary.name && summary.name !== 'Unknown' && summary.id && summary.id !== 'N/A';
+        if (!hasData) {
+          autoRefreshAttempted = true;
+          Promise.resolve()
+            .then(() => spear?.FactionService?.refreshFaction?.())
+            .then(() => window.OdinUI?.refreshContent?.())
+            .catch(() => window.OdinUI?.refreshContent?.());
+        } else {
+          autoRefreshAttempted = true;
+        }
       }
 
+      const hasPermissionError = spear?.FactionService?.hasPermissionError();
+      const lastError = spear?.FactionService?.getLastError();
 
       // ============================================
       // ERROR STATE
