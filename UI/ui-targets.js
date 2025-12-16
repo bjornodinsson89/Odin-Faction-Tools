@@ -3,6 +3,7 @@
 // Version: 3.1.0 
 // Author: BjornOdinsson89
 
+
 (function () {
   'use strict';
 
@@ -175,7 +176,6 @@
 
         targetsSection.appendChild(targetsCard);
         container.appendChild(targetsSection);
-	      }
 // ============================================
 // PERSONAL TARGETS (moved into Targets tab)
 // ============================================
@@ -624,5 +624,6 @@ container.appendChild(personalSection);
     }
 
     return { id: 'ui-targets', init, destroy };
+}
   });
 })();
