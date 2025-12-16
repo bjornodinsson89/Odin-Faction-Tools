@@ -134,12 +134,34 @@
 
           ${summary.rank?.name ? `
             <div style="margin-top: 12px; padding: 10px; background: rgba(102, 126, 234, 0.1); border-radius: 6px;">
-              <span style="color: #718096; font-size: 12px;">Rank:</span>
+              <span style="color: #718096; font-size: 12px;">War Rank:</span>
               <span style="color: #667eea; margin-left: 4px; font-weight: 500;">
-                #${summary.rank.position || '?'} - ${summary.rank.name}
+                #${summary.rank.position || \'?\'} - ${summary.rank.name}${summary.rank.division ? ` (Div ${summary.rank.division})` : ``}${(typeof summary.rank.wins === \'number\') ? ` • ${summary.rank.wins}W` : ``}
               </span>
             </div>
           ` : ''}
+${(() => {
+  const upcoming = getUpcomingWarInfo(summary);
+  if (!upcoming) return '';
+  const ms = (upcoming.start * 1000) - Date.now();
+  const when = formatDuration(ms);
+  const opp = upcoming.opponentName ? upcoming.opponentName : (upcoming.opponentId ? `Faction ${upcoming.opponentId}` : 'Unknown opponent');
+  return `
+    <div style="margin-top: 12px; padding: 10px; background: rgba(72, 187, 120, 0.1); border-radius: 6px;">
+      <div style="display:flex; justify-content: space-between; gap: 10px; flex-wrap: wrap;">
+        <div>
+          <span style="color: #718096; font-size: 12px;">Upcoming War:</span>
+          <span style="color: #48bb78; margin-left: 6px; font-weight: 600;">${opp}</span>
+        </div>
+        <div>
+          <span style="color: #718096; font-size: 12px;">Starts in:</span>
+          <span style="color: #e2e8f0; margin-left: 6px; font-weight: 600;">${when}</span>
+        </div>
+      </div>
+    </div>
+  `;
+})()}
+
         `);
 
         overviewSection.appendChild(overviewCard);
@@ -298,6 +320,80 @@
       if (num >= 1e3) return (num / 1e3).toFixed(1) + 'K';
       return num.toLocaleString();
     }
+function getUpcomingWarInfo(summary) {
+  if (!summary) return null;
+  const now = Math.floor(Date.now() / 1000);
+
+  const myFactionId = Number(summary.id) || null;
+  const rankedWars = summary.rankedWars || {};
+  const warObj = summary.war || null;
+
+  // Prefer ranked_wars structure because it contains faction names
+  let best = null;
+
+  for (const [warId, war] of Object.entries(rankedWars)) {
+    if (!war || typeof war !== 'object') continue;
+    const start = Number(war.start || 0);
+    const end = Number(war.end || 0);
+
+    if (start && start > now) {
+      const factions = war.factions || {};
+      let opponentName = null;
+      let opponentId = null;
+
+      for (const [fid, f] of Object.entries(factions)) {
+        const nFid = Number(fid);
+        if (myFactionId && nFid === myFactionId) continue;
+        opponentId = nFid;
+        opponentName = f?.name || null;
+        break;
+      }
+
+      const candidate = {
+        warId: Number(warId) || warId,
+        start,
+        end,
+        opponentId,
+        opponentName,
+        target: war.target || null,
+      };
+
+      if (!best || candidate.start < best.start) best = candidate;
+    }
+  }
+
+  // Fallback: summary.war if present and in the future (may not have opponent name)
+  if (!best && warObj && typeof warObj === 'object') {
+    const start = Number(warObj.start || 0);
+    const end = Number(warObj.end || 0);
+    if (start && start > now) {
+      best = {
+        warId: null,
+        start,
+        end,
+        opponentId: null,
+        opponentName: null,
+        target: warObj.target || null,
+      };
+    }
+  }
+
+  return best;
+}
+
+function formatDuration(ms) {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (days > 0) return `${days}d ${hours}h ${minutes}m`;
+  if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
+  if (minutes > 0) return `${minutes}m ${seconds}s`;
+  return `${seconds}s`;
+}
+
 
     function calculateActivityStats(members) {
       const now = Date.now();
