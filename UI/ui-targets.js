@@ -1,6 +1,7 @@
 // ui-targets.js
 // Target selection UI with Freki scoring
-// Version: 3.1.0 - Fixed: Single tab registration pattern
+// Version: 3.1.0 
+// Author: BjornOdinsson89
 
 (function () {
   'use strict';
@@ -174,6 +175,7 @@
 
         targetsSection.appendChild(targetsCard);
         container.appendChild(targetsSection);
+	      }
 // ============================================
 // PERSONAL TARGETS (moved into Targets tab)
 // ============================================
