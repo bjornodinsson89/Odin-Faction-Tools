@@ -1,6 +1,7 @@
 // ui-leadership.js
 // Leadership controls UI
-// Version: 3.1.0 - Fixed: Single tab registration pattern
+// Version: 3.1.0
+// Author: BjornOdinsson89
 
 (function () {
   'use strict';
@@ -190,50 +191,8 @@
       }
 
       // ============================================
-      // DIAGNOSTICS SECTION
-      // ============================================
-      const diagSection = UI.createSection('System Diagnostics', '🔧');
-
-      const diagCard = UI.createCard(`
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 8px; margin-bottom: 12px;">
-          <div style="text-align: center; padding: 8px; background: rgba(102, 126, 234, 0.1); border-radius: 6px;">
-            <div style="font-size: 18px; font-weight: 700; color: #667eea;">${adoption.sessionCount || 0}</div>
-            <div style="font-size: 10px; color: #718096;">Sessions</div>
-          </div>
-          <div style="text-align: center; padding: 8px; background: rgba(72, 187, 120, 0.1); border-radius: 6px;">
-            <div style="font-size: 18px; font-weight: 700; color: #48bb78;">${adoption.actionsPerformed || 0}</div>
-            <div style="font-size: 10px; color: #718096;">Actions</div>
-          </div>
-          <div style="text-align: center; padding: 8px; background: rgba(229, 62, 62, 0.1); border-radius: 6px;">
-            <div style="font-size: 18px; font-weight: 700; color: #fc8181;">${diagnostics.length}</div>
-            <div style="font-size: 10px; color: #718096;">Errors</div>
-          </div>
-        </div>
-
-        ${diagnostics.length > 0 ? `
-          <div style="max-height: 150px; overflow-y: auto; background: rgba(0,0,0,0.2); border-radius: 6px; padding: 8px;">
-            ${diagnostics.slice(0, 5).map((err) => `
-              <div style="font-size: 11px; color: #fc8181; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.05);">
-                ${err.message}
-                <span style="color: #718096; margin-left: 8px;">${new Date(err.timestamp).toLocaleTimeString()}</span>
-              </div>
-            `).join('')}
-          </div>
-          <button id="clear-errors" class="odin-btn odin-btn-warning" style="margin-top: 8px;">
-            Clear Errors
-          </button>
-        ` : `
-          <div style="text-align: center; color: #48bb78; font-size: 13px;">
-            ✓ No errors logged
-          </div>
-        `}
-      `);
-
-      diagSection.appendChild(diagCard);
-      container.appendChild(diagSection);
-
-      // ============================================
       // DATA MANAGEMENT SECTION
+      // ============================================
       // ============================================
       const dataSection = UI.createSection('Data Management', '💾');
 
@@ -302,11 +261,6 @@
 
       document.getElementById('clear-unauthorized')?.addEventListener('click', () => {
         spear?.UnauthorizedAttackService?.clearUnauthorized();
-        window.OdinUI?.refreshContent();
-      });
-
-      document.getElementById('clear-errors')?.addEventListener('click', () => {
-        spear?.DiagnosticsService?.clearErrors();
         window.OdinUI?.refreshContent();
       });
 
