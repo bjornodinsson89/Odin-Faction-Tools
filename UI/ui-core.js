@@ -90,7 +90,11 @@
       }
 
       .odin-header-logo {
-        font-size: 24px;
+        width: 22px;
+        height: 22px;
+        display: inline-block;
+        object-fit: contain;
+        border-radius: 6px;
       }
 
       .odin-header-close {
@@ -282,8 +286,17 @@
 }
       
       .odin-toggle-btn-icon {
-  font-size: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   line-height: 1;
+}
+.odin-toggle-btn-logo {
+  width: 24px;
+  height: 24px;
+  display: block;
+  object-fit: contain;
+  border-radius: 6px;
 }
       
       .odin-toggle-btn-text {
@@ -747,7 +760,7 @@
       buttonElement.className = 'odin-toggle-btn odin-menu-btn';
       buttonElement.id = 'odin-toggle-btn';
             buttonElement.innerHTML = `
-        <div class="odin-toggle-btn-icon">🐻</div>
+        <div class="odin-toggle-btn-icon"><img class="odin-toggle-btn-logo" src="https://i.postimg.cc/BQ6bSYKM/file-000000004bb071f5a96fc52564bf26ad-(1).png" alt="Odin" /></div>
         <div class="odin-toggle-btn-text">ODIN</div>
       `;
       buttonElement.title = 'Odin Tools';
@@ -848,7 +861,7 @@
       header.className = 'odin-header';
       header.innerHTML = `
         <div class="odin-header-title">
-          <span class="odin-header-logo">🐻</span>
+          <img class="odin-header-logo" src="https://i.postimg.cc/BQ6bSYKM/file-000000004bb071f5a96fc52564bf26ad-(1).png" alt="Odin" />
           <span>Odin Tools</span>
         </div>
         <button class="odin-header-close" id="odin-close">✕</button>
