@@ -1,6 +1,7 @@
 // ui-settings.js
 // Settings panel UI
-// Version: 3.1.0 - Fixed: Single tab registration pattern
+// Version: 3.1.0 
+// Author: BjornOdinsson89
 
 (function () {
   'use strict';
@@ -334,6 +335,112 @@
 
       versionSection.appendChild(versionCard);
       container.appendChild(versionSection);
+
+
+      // ============================================
+      // SYSTEM DIAGNOSTICS SECTION (MOVED FROM LEADERSHIP)
+      // ============================================
+      const spear = (ctx.spear?.services) || (window.OdinsSpear?.services);
+      const diagnostics = spear?.DiagnosticsService?.getErrors?.() || [];
+      const adoption = spear?.AdoptionService?.getMetrics?.() || {};
+
+      const diagSection = UI.createSection('System Diagnostics', '🔧');
+
+      const diagCard = UI.createCard(`
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; margin-bottom: 12px;">
+          <div style="text-align: center; padding: 8px; background: rgba(102, 126, 234, 0.1); border-radius: 6px;">
+            <div style="font-size: 18px; font-weight: 700; color: #667eea;">${adoption.sessionCount || 0}</div>
+            <div style="font-size: 10px; color: #718096;">Sessions</div>
+          </div>
+          <div style="text-align: center; padding: 8px; background: rgba(72, 187, 120, 0.1); border-radius: 6px;">
+            <div style="font-size: 18px; font-weight: 700; color: #48bb78;">${adoption.actionsPerformed || 0}</div>
+            <div style="font-size: 10px; color: #718096;">Actions</div>
+          </div>
+          <div style="text-align: center; padding: 8px; background: rgba(229, 62, 62, 0.1); border-radius: 6px;">
+            <div style="font-size: 18px; font-weight: 700; color: #fc8181;">${diagnostics.length}</div>
+            <div style="font-size: 10px; color: #718096;">Errors</div>
+          </div>
+        </div>
+
+        ${diagnostics.length > 0 ? `
+          <div style="max-height: 170px; overflow-y: auto; background: rgba(0,0,0,0.2); border-radius: 6px; padding: 8px;">
+            ${diagnostics.slice(0, 20).map((err) => `
+              <div style="font-size: 11px; color: #fc8181; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.05);">
+                ${err.message}
+                <span style="color: #718096; margin-left: 8px;">${new Date(err.timestamp).toLocaleTimeString()}</span>
+              </div>
+            `).join('')}
+          </div>
+          <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
+            <button id="odin-diag-clear-errors" class="odin-btn odin-btn-warning">Clear Errors</button>
+            <button id="odin-diag-refresh" class="odin-btn odin-btn-secondary">Refresh</button>
+          </div>
+        ` : `
+          <div style="text-align: center; color: #48bb78; font-size: 13px;">
+            ✓ No errors logged
+          </div>
+          <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; justify-content:center;">
+            <button id="odin-diag-refresh" class="odin-btn odin-btn-secondary">Refresh</button>
+          </div>
+        `}
+      `);
+
+      diagSection.appendChild(diagCard);
+      container.appendChild(diagSection);
+
+      // ============================================
+      // NETWORK CONSOLE SECTION
+      // ============================================
+      const net = window.__ODIN_NET_LOG__ || { api: [], db: [] };
+      const apiCalls = Array.isArray(net.api) ? net.api : [];
+      const dbCalls = Array.isArray(net.db) ? net.db : [];
+
+      const netSection = UI.createSection('Network Console', '📡');
+
+      const netCard = UI.createCard(`
+        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;">
+          <button id="odin-net-refresh" class="odin-btn odin-btn-secondary">Refresh</button>
+          <button id="odin-net-clear" class="odin-btn odin-btn-warning">Clear</button>
+        </div>
+
+        <div style="display:grid; grid-template-columns: 1fr; gap:12px;">
+          <div>
+            <div style="font-weight:600; font-size:13px; margin-bottom:6px;">Outgoing API Calls <span style="color:#718096; font-weight:500;">(${apiCalls.length})</span></div>
+            <div style="max-height: 220px; overflow:auto; background: rgba(0,0,0,0.25); border-radius: 8px; padding: 8px;">
+              ${apiCalls.slice(0, 200).map((c) => `
+                <div style="font-size: 11px; padding:6px 0; border-bottom: 1px solid rgba(255,255,255,0.05);">
+                  <div style="display:flex; justify-content:space-between; gap:8px;">
+                    <span style="color:${c.ok ? '#48bb78' : '#fc8181'};">${c.ok ? 'OK' : 'FAIL'}</span>
+                    <span style="color:#a0aec0;">${new Date(c.ts).toLocaleTimeString()}</span>
+                  </div>
+                  <div style="color:#e2e8f0; word-break: break-word;">${c.service || 'api'} • ${c.method || 'GET'} • ${c.url || ''}</div>
+                  ${c.error ? `<div style="color:#fc8181; word-break: break-word;">${c.error}</div>` : ''}
+                </div>
+              `).join('') || `<div style="color:#718096; font-size:12px; padding:6px 0;">No API calls logged yet.</div>`}
+            </div>
+          </div>
+
+          <div>
+            <div style="font-weight:600; font-size:13px; margin-bottom:6px;">Outgoing DB Calls <span style="color:#718096; font-weight:500;">(${dbCalls.length})</span></div>
+            <div style="max-height: 220px; overflow:auto; background: rgba(0,0,0,0.25); border-radius: 8px; padding: 8px;">
+              ${dbCalls.slice(0, 200).map((c) => `
+                <div style="font-size: 11px; padding:6px 0; border-bottom: 1px solid rgba(255,255,255,0.05);">
+                  <div style="display:flex; justify-content:space-between; gap:8px;">
+                    <span style="color:${c.ok ? '#48bb78' : '#fc8181'};">${c.ok ? 'OK' : 'FAIL'}</span>
+                    <span style="color:#a0aec0;">${new Date(c.ts).toLocaleTimeString()}</span>
+                  </div>
+                  <div style="color:#e2e8f0; word-break: break-word;">${c.db || 'db'} • ${c.op || ''} • ${c.path || ''}</div>
+                  ${c.meta ? `<div style="color:#718096; word-break: break-word;">${c.meta}</div>` : ''}
+                  ${c.error ? `<div style="color:#fc8181; word-break: break-word;">${c.error}</div>` : ''}
+                </div>
+              `).join('') || `<div style="color:#718096; font-size:12px; padding:6px 0;">No DB calls logged yet.</div>`}
+            </div>
+          </div>
+        </div>
+      `);
+
+      netSection.appendChild(netCard);
+      container.appendChild(netSection);
 
       setTimeout(() => attachEventListeners(), 0);
 
