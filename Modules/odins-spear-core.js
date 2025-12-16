@@ -892,16 +892,15 @@
 
       async refreshFaction() {
         try {
-          // Fetch faction basic info
+          // Fetch faction basic info (members already include `position`, so `positions` selection is not required)
           const data = await api.tornGet('/faction', 'basic');
-          
-          if (data.error) {
-            // Handle Torn API errors
-            this._lastErrorMessage = data.error.error || 'Unknown API error';
-            if (data.error.code === 16 || data.error.code === 7) {
-              this._hasPermissionError = true;
-            }
-            throw new Error(this._lastErrorMessage);
+
+          // Handle legacy-style responses if any caller injects `{error:{...}}` instead of throwing
+          if (data && data.error) {
+            const msg = data.error.error || 'Unknown API error';
+            this._lastErrorMessage = msg;
+            this._hasPermissionError = (data.error.code === 16 || data.error.code === 7);
+            throw new Error(msg);
           }
 
           // Reset error state on success
@@ -915,7 +914,7 @@
           // Parse members from the response
           this._members = this._parseMembers(data);
 
-          // Persist to storage
+          // Persist snapshot
           store.set('factionData', {
             data: this._factionData,
             members: this._members,
@@ -926,14 +925,24 @@
 
           return this._factionData;
         } catch (e) {
-          error('[FactionService] Refresh failed:', e.message);
-          this._lastErrorMessage = e.message || 'Unknown error';
-          if (e.message && (e.message.includes('permission') || e.message.includes('access'))) {
+          error('[FactionService] Refresh failed:', e.message || e);
+
+          // Torn API throws are normalized by OdinApi with `.code` when possible
+          const code = (typeof e?.code === 'number') ? e.code : (typeof e?.errorCode === 'number' ? e.errorCode : null);
+          const msg = e?.message || 'Unknown error';
+
+          this._lastErrorMessage = msg;
+
+          if (code === 16 || code === 7) {
+            this._hasPermissionError = true;
+          } else if (msg && (msg.toLowerCase().includes('permission') || msg.toLowerCase().includes('access'))) {
             this._hasPermissionError = true;
           }
+
           throw e;
         }
       },
+
 
       _parseMembers(data) {
         if (!data.members) return [];
@@ -988,6 +997,8 @@
           raidWars: data.raid_wars || {},
           peace: data.peace || {},
           rank: data.rank || {},
+          rankedWars: data.ranked_wars || {},
+          war: data.war || null,
           lastFetched: this._lastFetched,
         };
       },
