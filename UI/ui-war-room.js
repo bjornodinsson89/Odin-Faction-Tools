@@ -1,6 +1,7 @@
 // ui-war-room.js
 // War Room dashboard UI
 // Version: 3.1.0 
+// Author: BjornOdinsson89
 
 (function () {
   'use strict';
