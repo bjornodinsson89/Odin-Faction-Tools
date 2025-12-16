@@ -890,17 +890,54 @@
       },
 
       async refreshFaction() {
-        this._hasPermissionError = false;
-        this._lastErrorMessage = null;
+        try {
+          const basic = await api.tornGet('/faction', 'basic');
 
-        const persistAndEmit = () => {
-          // Store raw faction data
+          if (basic && basic.error) {
+            this._lastErrorMessage = basic.error.error || 'Unknown API error';
+            if (basic.error.code === 16 || basic.error.code === 7) {
+              this._hasPermissionError = true;
+            }
+            throw new Error(this._lastErrorMessage);
+          }
+
+          let positionsData = null;
+          try {
+            const pos = await api.tornGet('/faction', 'positions');
+            if (pos && !pos.error) {
+              positionsData = pos;
+            } else if (pos && pos.error) {
+              if (pos.error.code === 16 || pos.error.code === 7) {
+                // Missing faction API access permission (AA) or private selection restriction.
+                // Not fatal: basic data is still usable.
+              }
+            }
+          } catch (_) {
+            // Not fatal: positions are optional for basic faction view.
+          }
+
+          const data = positionsData ? Object.assign({}, basic, positionsData) : basic;
+
+          this._hasPermissionError = false;
+          this._lastErrorMessage = null;
+
+          this._factionData = {
+            id: data.ID || data.id || null,
+            name: data.name || null,
+            tag: data.tag || null,
+            leader: data.leader || null,
+            coLeader: data.co_leader || data.coLeader || null,
+            respect: data.respect || 0,
+            bestChain: data.best_chain || data.bestChain || 0,
+            membersCount: data.members ? Object.keys(data.members).length : (data.members_count || data.membersCount || 0),
+            positions: data.positions || {},
+            isEnlisted: data.is_enlisted ?? null,
+          };
+
           this._lastFetched = Date.now();
 
-          // Parse members from the response
-          this._members = this._parseMembers(this._factionData || {});
+          this._members = this._parseMembers(data);
 
-          // Persist to storage
           store.set('factionData', {
             data: this._factionData,
             members: this._members,
@@ -908,62 +945,12 @@
           });
 
           nexus.emit(EVENTS.FACTION_UPDATED, { faction: this.getSummary(), members: this._members });
-        };
 
-        try {
-          // Fetch faction basic info and positions (your own faction)
-          const data = await api.tornGet('/faction', 'basic,positions');
-
-          // Some API wrappers return {error:{...}} instead of throwing. Handle it.
-          if (data && data.error) {
-            this._lastErrorMessage = data.error.error || 'Unknown API error';
-            const code = data.error.code;
-            if (code === 7 || code === 16) this._hasPermissionError = true;
-            throw Object.assign(new Error(this._lastErrorMessage), { code, _torn: data.error });
-          }
-
-          // Reset error state on success
-          this._hasPermissionError = false;
-          this._lastErrorMessage = null;
-
-          this._factionData = data;
-          persistAndEmit();
           return this._factionData;
         } catch (e) {
-          const code = (e && (e.code || (e._torn && e._torn.code))) || null;
-
-          // Most common cause: missing faction API access / AA permission or limited custom key.
-          if (code === 7 || code === 16) {
-            this._hasPermissionError = true;
-
-            // Try a public/basic fallback using faction ID from /user basic.
-            try {
-              const u = await api.tornGet('/user', 'basic');
-              const fid =
-                (u && u.faction && (u.faction.faction_id || u.faction.ID || u.faction.id)) ||
-                u.faction_id ||
-                null;
-
-              if (fid) {
-                const basic = await api.tornGet(`/faction/${fid}`, 'basic');
-                if (basic && !basic.error) {
-                  this._factionData = basic;
-                  this._lastErrorMessage = 'Limited faction API access: showing basic faction info only. Enable faction API access / AA to load members & positions.';
-                  persistAndEmit();
-                  return this._factionData;
-                }
-              }
-            } catch (_) {
-              // ignore fallback failures and show the primary guidance message below
-            }
-
-            this._lastErrorMessage = 'Faction API access denied. Your key likely lacks faction access, or your faction has not granted you API Access (AA). Use a key with faction access and/or ask leadership to grant AA.';
-            throw new Error(this._lastErrorMessage);
-          }
-
-          error('[FactionService] Refresh failed:', (e && e.message) ? e.message : e);
-          this._lastErrorMessage = (e && e.message) ? e.message : 'Unknown error';
-          if (e && e.message && (e.message.toLowerCase().includes('permission') || e.message.toLowerCase().includes('access'))) {
+          error('[FactionService] Refresh failed:', e.message);
+          this._lastErrorMessage = e.message || 'Unknown error';
+          if (e.message && (e.message.includes('permission') || e.message.includes('access'))) {
             this._hasPermissionError = true;
           }
           throw e;
