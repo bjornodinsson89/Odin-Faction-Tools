@@ -1,6 +1,6 @@
 // ui-war-room.js
 // War Room dashboard UI
-// Version: 3.1.0 - Fixed: Single tab registration pattern
+// Version: 3.1.0 
 
 (function () {
   'use strict';
