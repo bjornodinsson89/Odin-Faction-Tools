@@ -3,7 +3,7 @@
  * Handles all external API communications with rate limiting and caching
  * 
  * @version 3.1.0
- * @author Houston
+ * @author BjornOdinsson89
  * @requires GM_xmlhttpRequest (provided by Tampermonkey)
  */
 
@@ -640,23 +640,34 @@ async function tornGet(endpoint, selections = '') {
     }
   };
 
-  try {
-    return await attempt(urlV2, 'v2');
-  } catch (e) {
-    const msg = (e && e.message) ? e.message.toLowerCase() : '';
-    const code = e && e.code;
-    const shouldFallback =
-      code === 2 || code === 3 || code === 5 || code === 7 || code === 12 ||
-      msg.includes('unknown selection') ||
-      msg.includes('invalid selection') ||
-      msg.includes('endpoint') ||
-      msg.includes('not found') ||
-      msg.includes('deprecated') ||
-      msg.includes('incorrect id-entity relation');
+  
+  const wantsV1First = !!String(selections || '').trim();
 
-    if (!shouldFallback) throw e;
-    return await attempt(urlV1, 'v1');
+  const fallbackFrom = async (primaryUrl, primaryLabel, secondaryUrl, secondaryLabel) => {
+    try {
+      return await attempt(primaryUrl, primaryLabel);
+    } catch (e) {
+      const msg = (e && e.message) ? e.message.toLowerCase() : '';
+      const code = e && e.code;
+      const shouldFallback =
+        code === 2 || code === 3 || code === 5 || code === 7 || code === 12 ||
+        msg.includes('unknown selection') ||
+        msg.includes('invalid selection') ||
+        msg.includes('endpoint') ||
+        msg.includes('not found') ||
+        msg.includes('deprecated') ||
+        msg.includes('incorrect id-entity relation');
+
+      if (!shouldFallback) throw e;
+      return await attempt(secondaryUrl, secondaryLabel);
+    }
+  };
+
+  if (wantsV1First) {
+    return await fallbackFrom(urlV1, 'v1', urlV2, 'v2');
   }
+  return await fallbackFrom(urlV2, 'v2', urlV1, 'v1');
+
 }
 
     /**
