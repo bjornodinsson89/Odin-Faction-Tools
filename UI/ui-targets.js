@@ -182,7 +182,9 @@ const personalSection = UI.createSection('Personal Targets', '⭐');
 const personalTargets = (() => {
   try {
     const saved = storage.getJSON('odin_personal_targets');
-    return Array.isArray(saved) ? saved : (saved ? Object.values(saved) : []);
+    if (Array.isArray(saved)) return saved;
+    if (saved && typeof saved === 'object') return Object.values(saved);
+    return [];
   } catch (e) {
     return [];
   }
@@ -192,69 +194,76 @@ const personalCard = document.createElement('div');
 personalCard.className = 'odin-card';
 personalCard.style.padding = '0';
 
-if (!personalTargets.length) {
-  personalCard.innerHTML = `
-    <div style="padding: 14px 16px; color: #718096; font-size: 12px;">
-      No personal targets yet. Add them from any “Add Personal Target” action (or legacy Personal tab), then manage them here.
+const personalRowsHtml = personalTargets.length
+  ? personalTargets.map((t, i) => {
+      const id = (t && (t.id || t.playerId)) ? String(t.id || t.playerId) : '';
+      const name = (t && (t.name || t.playerName)) ? String(t.name || t.playerName) : (id ? `Player #${id}` : 'Unknown');
+      return `
+        <tr style="border-top: 1px solid rgba(255,255,255,0.06); background: ${i % 2 === 0 ? 'transparent' : 'rgba(0,0,0,0.10)'};">
+          <td style="padding: 10px 12px;">
+            ${id ? `<a href="https://www.torn.com/profiles.php?XID=${id}" target="_blank" rel="noopener" style="color:#667eea; text-decoration:none;">${name}</a>` : name}
+          </td>
+          <td style="padding: 10px 12px; color:#a0aec0; font-size: 12px;">${id || '-'}</td>
+          <td style="padding: 10px 12px; text-align:right;">
+            <button class="odin-btn odin-btn-danger odin-personal-target-remove" data-id="${id}" style="padding: 4px 8px; font-size: 11px;">
+              Remove
+            </button>
+          </td>
+        </tr>
+      `;
+    }).join('')
+  : `
+      <tr style="border-top: 1px solid rgba(255,255,255,0.06);">
+        <td colspan="3" style="padding: 12px; color: #718096; font-size: 12px;">
+          No personal targets yet. Add one below.
+        </td>
+      </tr>
+    `;
+
+personalCard.innerHTML = `
+  <div style="padding: 14px 16px; border-bottom: 1px solid rgba(255,255,255,0.06);">
+    <div style="display: grid; grid-template-columns: 1fr 140px auto; gap: 10px; align-items: end;">
+      <div>
+        <label style="display:block; color:#a0aec0; font-size: 12px; margin-bottom: 6px;">Name (optional)</label>
+        <input type="text" id="odin-personal-target-name" placeholder="Player name"
+          style="width: 100%; padding: 10px 12px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; color: #e2e8f0; font-size: 14px;">
+      </div>
+      <div>
+        <label style="display:block; color:#a0aec0; font-size: 12px; margin-bottom: 6px;">Player ID</label>
+        <input type="text" inputmode="numeric" id="odin-personal-target-id" placeholder="123456"
+          style="width: 100%; padding: 10px 12px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; color: #e2e8f0; font-size: 14px;">
+      </div>
+      <div>
+        <button class="odin-btn odin-btn-primary" id="odin-personal-target-add" style="padding: 10px 12px; font-size: 13px;">
+          Add
+        </button>
+      </div>
     </div>
-  `;
-} else {
-  personalCard.innerHTML = `
-    <div style="overflow-x:auto;">
-      <table style="width:100%; border-collapse: collapse;">
-        <thead>
-          <tr style="background: rgba(0,0,0,0.18);">
-            <th style="text-align:left; padding: 10px 12px; font-size: 11px; color:#a0aec0; font-weight:600;">Name</th>
-            <th style="text-align:left; padding: 10px 12px; font-size: 11px; color:#a0aec0; font-weight:600;">ID</th>
-            <th style="text-align:right; padding: 10px 12px; font-size: 11px; color:#a0aec0; font-weight:600;">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${personalTargets.map((t, i) => {
-            const id = (t && (t.id || t.playerId)) ? String(t.id || t.playerId) : '';
-            const name = (t && (t.name || t.playerName)) ? String(t.name || t.playerName) : (id ? `Player #${id}` : 'Unknown');
-            return `
-              <tr style="border-top: 1px solid rgba(255,255,255,0.05); background: ${i % 2 === 0 ? 'transparent' : 'rgba(0,0,0,0.10)'};">
-                <td style="padding: 10px 12px;">
-                  ${id ? `<a href="https://www.torn.com/profiles.php?XID=${id}" target="_blank" style="color:#667eea; text-decoration:none;">${name}</a>` : name}
-                </td>
-                <td style="padding: 10px 12px; color:#a0aec0; font-size: 12px;">${id || '-'}</td>
-                <td style="padding: 10px 12px; text-align:right;">
-                  <button class="odin-btn odin-btn-danger odin-personal-remove" data-id="${id}" style="padding: 4px 8px; font-size: 11px;">
-                    Remove
-                  </button>
-                </td>
-              </tr>
-            `;
-          }).join('')}
-        </tbody>
-      </table>
+    <div style="margin-top: 10px; color: #718096; font-size: 12px;">
+      Tip: If Name is blank, Odin will try to fetch it from Torn when you add.
     </div>
-  `;
-}
+  </div>
+
+  <div style="overflow-x:auto;">
+    <table style="width:100%; border-collapse: collapse;">
+      <thead>
+        <tr style="background: rgba(0,0,0,0.18);">
+          <th style="text-align:left; padding: 10px 12px; font-size: 11px; color:#a0aec0; font-weight:600;">Name</th>
+          <th style="text-align:left; padding: 10px 12px; font-size: 11px; color:#a0aec0; font-weight:600;">ID</th>
+          <th style="text-align:right; padding: 10px 12px; font-size: 11px; color:#a0aec0; font-weight:600;">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${personalRowsHtml}
+      </tbody>
+    </table>
+  </div>
+`;
 
 personalSection.appendChild(personalCard);
 container.appendChild(personalSection);
 
-      } else {
-        // Empty state
-        const emptySection = UI.createSection('Enemy Targets', '⚔️');
-        const emptyCard = UI.createCard(`
-          <div style="text-align: center; padding: 32px;">
-            <div style="font-size: 48px; margin-bottom: 16px;">🎯</div>
-            <div style="color: #718096; font-size: 14px;">No targets loaded</div>
-            <div style="color: #4a5568; font-size: 12px; margin-top: 8px;">
-              ${warConfig.enemyFactionId 
-                ? 'Click "Load Enemy Faction" to fetch targets'
-                : 'Set an enemy faction in Leadership tab first'}
-            </div>
-          </div>
-        `);
-        emptySection.appendChild(emptyCard);
-        container.appendChild(emptySection);
-      }
-
-      // ============================================
+// ============================================
       // STATS SECTION
       // ============================================
       if (targets.length > 0) {
@@ -487,6 +496,99 @@ container.appendChild(personalSection);
         });
       });
     }
+
+
+      const readPersonalTargets = () => {
+        try {
+          const saved = storage.getJSON('odin_personal_targets');
+          if (Array.isArray(saved)) return saved;
+          if (saved && typeof saved === 'object') return Object.values(saved);
+          return [];
+        } catch (e) {
+          return [];
+        }
+      };
+
+      const savePersonalTargets = (list) => {
+        storage.setJSON('odin_personal_targets', list);
+      };
+
+      const guessNameFromUserResp = (data, fallback) => {
+        return data?.name || data?.player?.name || data?.basic?.name || fallback;
+      };
+
+      const doAddPersonal = async () => {
+        const idEl = document.getElementById('odin-personal-target-id');
+        const nameEl = document.getElementById('odin-personal-target-name');
+        const rawId = (idEl && idEl.value) ? String(idEl.value).trim() : '';
+        const id = rawId.replace(/\D+/g, '');
+        if (!id) {
+          window.OdinUI?.showNotification?.('Enter a valid Player ID', 'warning');
+          return;
+        }
+
+        const api = ctx.api || window.OdinContext?.api || window.OdinApiConfig || window.OdinApi;
+        let name = (nameEl && nameEl.value) ? String(nameEl.value).trim() : '';
+        if (!name) {
+          try {
+            const data = await api?.tornGet?.(`/user/${id}`, 'basic');
+            name = guessNameFromUserResp(data, '');
+          } catch (e) {
+            name = '';
+          }
+        }
+        if (!name) name = `Player #${id}`;
+
+        let list = readPersonalTargets();
+        if (list.some(t => String(t?.id || t?.playerId) === String(id))) {
+          window.OdinUI?.showNotification?.('Target already in Personal Targets', 'warning');
+          return;
+        }
+
+        list.push({
+          id: Number(id),
+          name,
+          addedAt: Date.now(),
+          frekiScore: null,
+          lastUpdated: null,
+          status: null,
+          level: null,
+          faction: null
+        });
+
+        savePersonalTargets(list);
+
+        if (idEl) idEl.value = '';
+        if (nameEl) nameEl.value = '';
+
+        window.OdinUI?.refreshContent();
+        window.OdinUI?.showNotification?.(`Added ${name}`, 'success');
+      };
+
+      const addBtn = document.getElementById('odin-personal-target-add');
+      addBtn?.addEventListener('click', doAddPersonal);
+
+      const idInput = document.getElementById('odin-personal-target-id');
+      const nameInput = document.getElementById('odin-personal-target-name');
+      const onEnter = (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          doAddPersonal();
+        }
+      };
+      idInput?.addEventListener('keydown', onEnter);
+      nameInput?.addEventListener('keydown', onEnter);
+
+      document.querySelectorAll('.odin-personal-target-remove').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          const id = e.currentTarget?.dataset?.id;
+          if (!id) return;
+          const list = readPersonalTargets().filter(t => String(t?.id || t?.playerId) !== String(id));
+          savePersonalTargets(list);
+          window.OdinUI?.refreshContent();
+          window.OdinUI?.showNotification?.('Removed personal target', 'success');
+        });
+      });
 
     // ============================================
     // MODULE INIT (Fixed: Single registration pattern)
