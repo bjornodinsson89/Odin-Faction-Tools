@@ -1,5 +1,5 @@
 // odins-spear-core.js
-// Faction war & chain coordination engine
+// Headless faction war & chain coordination engine
 // Version: 3.1.0
 // Author: BjornOdinsson89
 
@@ -889,37 +889,41 @@
           this._lastFetched = saved.lastFetched;
         }
       },
+
       async refreshFaction() {
-        this._hasPermissionError = false;
-        this._lastErrorMessage = null;
-
         try {
-          // Always fetch at least basic + members (works for non-leadership members without AA)
-          const base = await api.tornGet('/faction', 'basic,members');
+          // Fetch faction basic info and member roster (works for non-AA members)
+          let data = await api.tornGet('/faction', 'basic,members');
 
-          this._factionData = base || {};
-          this._lastFetched = Date.now();
-
-          // Try positions (AA-gated). If it fails, continue with base data.
+          // Optional: positions (requires faction API permission / AA). Do not fail if denied.
           try {
-            const pos = await api.tornGet('/faction', 'positions');
-            if (pos && pos.positions) this._factionData.positions = pos.positions;
-          } catch (e) {
-            const msg = (e && e.message) ? String(e.message).toLowerCase() : '';
-            const code = e && e.code;
-            const isPermission =
-              code === 7 ||
-              msg.includes('incorrect id-entity relation') ||
-              msg.includes('permission') ||
-              msg.includes('access');
-
-            if (!isPermission) {
-              log('[FactionService] positions fetch failed (non-permission):', e.message || e);
+            const posData = await api.tornGet('/faction', 'positions');
+            if (posData && !posData.error && posData.positions) {
+              data.positions = posData.positions;
             }
+          } catch (e) {
+            // Ignore AA/permission errors for positions and continue with basic+members.
           }
 
+if (data.error) {
+            // Handle Torn API errors
+            this._lastErrorMessage = data.error.error || 'Unknown API error';
+            if (data.error.code === 16 || data.error.code === 7) {
+              this._hasPermissionError = true;
+            }
+            throw new Error(this._lastErrorMessage);
+          }
+
+          // Reset error state on success
+          this._hasPermissionError = false;
+          this._lastErrorMessage = null;
+
+          // Store raw faction data
+          this._factionData = data;
+          this._lastFetched = Date.now();
+
           // Parse members from the response
-          this._members = this._parseMembers(this._factionData);
+          this._members = this._parseMembers(data);
 
           // Persist to storage
           store.set('factionData', {
@@ -934,105 +938,35 @@
         } catch (e) {
           error('[FactionService] Refresh failed:', e.message);
           this._lastErrorMessage = e.message || 'Unknown error';
-
-          const msg = (e && e.message) ? String(e.message).toLowerCase() : '';
-          const code = e && e.code;
-
-          this._hasPermissionError =
-            code === 7 ||
-            msg.includes('incorrect id-entity relation') ||
-            msg.includes('permission') ||
-            msg.includes('access');
-
-          // Do not wipe existing cached data; just report error state.
-          return null;
+          if (e.message && (e.message.includes('permission') || e.message.includes('access'))) {
+            this._hasPermissionError = true;
+          }
+          throw e;
         }
       },
-,
+
       _parseMembers(data) {
-        if (!data) return [];
+        if (!data.members) return [];
 
-        const rawMembers = data.members;
-        if (!rawMembers) return [];
-
-        // Normalize positions map (if present)
         const positions = data.positions || {};
-        const positionNameById = new Map();
+        const members = [];
 
-        if (Array.isArray(positions)) {
-          for (const p of positions) {
-            if (!p) continue;
-            const pid = (p.id !== undefined) ? p.id : p.position_id;
-            const pname = p.name || p.title;
-            if (pid !== undefined && pname) positionNameById.set(String(pid), String(pname));
-          }
-        } else if (positions && typeof positions === 'object') {
-          for (const [k, v] of Object.entries(positions)) {
-            if (!v) continue;
-            const pname = v.name || v.title || v;
-            if (pname) positionNameById.set(String(k), String(pname));
-          }
+        for (const [id, member] of Object.entries(data.members)) {
+          members.push({
+            id: parseInt(id, 10),
+            name: member.name,
+            level: member.level || 0,
+            position: member.position || 'Member',
+            daysInFaction: member.days_in_faction || 0,
+            lastAction: member.last_action?.relative || 'Unknown',
+            lastActionTimestamp: member.last_action?.timestamp || 0,
+            status: member.status?.state || 'ok',
+            statusUntil: member.status?.until || 0,
+          });
         }
 
-        const out = [];
-
-        // v1: members is an object keyed by user id
-        if (rawMembers && !Array.isArray(rawMembers) && typeof rawMembers === 'object') {
-          for (const [id, member] of Object.entries(rawMembers)) {
-            if (!member) continue;
-            const pid = member.position_id !== undefined ? member.position_id : member.position;
-            const posName =
-              (typeof member.position === 'string' && member.position) ||
-              (pid !== undefined ? positionNameById.get(String(pid)) : null) ||
-              'Member';
-
-            out.push({
-              id: parseInt(id, 10),
-              name: member.name || `#${id}`,
-              level: member.level || 0,
-              position: posName,
-              daysInFaction: member.days_in_faction || 0,
-              lastAction: member.last_action?.relative || 'Unknown',
-              lastActionTimestamp: member.last_action?.timestamp || 0,
-              status: member.status?.state || 'ok',
-              statusUntil: member.status?.until || 0,
-              isOnline: member.last_action?.status === 'Online' || member.status?.state === 'Online',
-            });
-          }
-          return out;
-        }
-
-        // v2 (or other): members might be an array
-        if (Array.isArray(rawMembers)) {
-          for (const member of rawMembers) {
-            if (!member) continue;
-            const id = member.id || member.user_id || member.player_id;
-            if (!id) continue;
-
-            const pid = member.position_id !== undefined ? member.position_id : member.position;
-            const posName =
-              (typeof member.position === 'string' && member.position) ||
-              (pid !== undefined ? positionNameById.get(String(pid)) : null) ||
-              'Member';
-
-            out.push({
-              id: parseInt(id, 10),
-              name: member.name || `#${id}`,
-              level: member.level || 0,
-              position: posName,
-              daysInFaction: member.days_in_faction || member.daysInFaction || 0,
-              lastAction: member.last_action?.relative || member.lastAction || 'Unknown',
-              lastActionTimestamp: member.last_action?.timestamp || member.lastActionTimestamp || 0,
-              status: member.status?.state || member.status || 'ok',
-              statusUntil: member.status?.until || member.statusUntil || 0,
-              isOnline: member.last_action?.status === 'Online' || member.status?.state === 'Online',
-            });
-          }
-        }
-
-        return out;
+        return members;
       },
-,
 
       getFaction() {
         return this._factionData ? { ...this._factionData } : null;
