@@ -1,6 +1,7 @@
 // ui-watchers.js
 // Watcher schedule UI
-// Version: 3.1.0 - Fixed: Single tab registration pattern
+// Version: 3.1.0 
+// Author: BjornOdinsson89
 
 (function () {
   'use strict';
