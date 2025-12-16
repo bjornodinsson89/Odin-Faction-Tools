@@ -890,29 +890,15 @@
       },
 
       async refreshFaction() {
-        try {
-          // Fetch faction basic info and positions
-          const data = await api.tornGet('/faction', 'basic,positions');
-          
-          if (data.error) {
-            // Handle Torn API errors
-            this._lastErrorMessage = data.error.error || 'Unknown API error';
-            if (data.error.code === 16 || data.error.code === 7) {
-              this._hasPermissionError = true;
-            }
-            throw new Error(this._lastErrorMessage);
-          }
+        this._hasPermissionError = false;
+        this._lastErrorMessage = null;
 
-          // Reset error state on success
-          this._hasPermissionError = false;
-          this._lastErrorMessage = null;
-
+        const persistAndEmit = () => {
           // Store raw faction data
-          this._factionData = data;
           this._lastFetched = Date.now();
 
           // Parse members from the response
-          this._members = this._parseMembers(data);
+          this._members = this._parseMembers(this._factionData || {});
 
           // Persist to storage
           store.set('factionData', {
@@ -922,12 +908,62 @@
           });
 
           nexus.emit(EVENTS.FACTION_UPDATED, { faction: this.getSummary(), members: this._members });
+        };
 
+        try {
+          // Fetch faction basic info and positions (your own faction)
+          const data = await api.tornGet('/faction', 'basic,positions');
+
+          // Some API wrappers return {error:{...}} instead of throwing. Handle it.
+          if (data && data.error) {
+            this._lastErrorMessage = data.error.error || 'Unknown API error';
+            const code = data.error.code;
+            if (code === 7 || code === 16) this._hasPermissionError = true;
+            throw Object.assign(new Error(this._lastErrorMessage), { code, _torn: data.error });
+          }
+
+          // Reset error state on success
+          this._hasPermissionError = false;
+          this._lastErrorMessage = null;
+
+          this._factionData = data;
+          persistAndEmit();
           return this._factionData;
         } catch (e) {
-          error('[FactionService] Refresh failed:', e.message);
-          this._lastErrorMessage = e.message || 'Unknown error';
-          if (e.message && (e.message.includes('permission') || e.message.includes('access'))) {
+          const code = (e && (e.code || (e._torn && e._torn.code))) || null;
+
+          // Most common cause: missing faction API access / AA permission or limited custom key.
+          if (code === 7 || code === 16) {
+            this._hasPermissionError = true;
+
+            // Try a public/basic fallback using faction ID from /user basic.
+            try {
+              const u = await api.tornGet('/user', 'basic');
+              const fid =
+                (u && u.faction && (u.faction.faction_id || u.faction.ID || u.faction.id)) ||
+                u.faction_id ||
+                null;
+
+              if (fid) {
+                const basic = await api.tornGet(`/faction/${fid}`, 'basic');
+                if (basic && !basic.error) {
+                  this._factionData = basic;
+                  this._lastErrorMessage = 'Limited faction API access: showing basic faction info only. Enable faction API access / AA to load members & positions.';
+                  persistAndEmit();
+                  return this._factionData;
+                }
+              }
+            } catch (_) {
+              // ignore fallback failures and show the primary guidance message below
+            }
+
+            this._lastErrorMessage = 'Faction API access denied. Your key likely lacks faction access, or your faction has not granted you API Access (AA). Use a key with faction access and/or ask leadership to grant AA.';
+            throw new Error(this._lastErrorMessage);
+          }
+
+          error('[FactionService] Refresh failed:', (e && e.message) ? e.message : e);
+          this._lastErrorMessage = (e && e.message) ? e.message : 'Unknown error';
+          if (e && e.message && (e.message.toLowerCase().includes('permission') || e.message.toLowerCase().includes('access'))) {
             this._hasPermissionError = true;
           }
           throw e;
