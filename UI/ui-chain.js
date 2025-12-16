@@ -1,6 +1,7 @@
 // ui-chain.js
 // Chain monitoring UI
-// Version: 3.1.0 - Fixed: Uses ChainMonitorService.refreshNow(), added error feedback
+// Version: 3.1.0 
+// Author:BjornOdinsson89
 
 (function () {
   'use strict';
