@@ -892,8 +892,8 @@
 
       async refreshFaction() {
         try {
-          // Fetch faction basic info and positions
-          const data = await api.tornGet('/faction', 'basic,positions');
+          // Fetch faction basic info
+          const data = await api.tornGet('/faction', 'basic');
           
           if (data.error) {
             // Handle Torn API errors
