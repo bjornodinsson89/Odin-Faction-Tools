@@ -16,6 +16,8 @@
 
     const UI_VERSION = '3.1.0';
 
+    const ODIN_LOGO_URL = 'https://i.postimg.cc/BQ6bSYKM/file-000000004bb071f5a96fc52564bf26ad-(1).png';
+
     // ============================================
     // STATE - PART 1: RESPONSIVE DEFAULT SIZE
     // ============================================
@@ -90,18 +92,22 @@
       }
 
       .odin-header-logo {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 24px;
-        height: 24px;
-        color: #b91c1c;
+        font-size: 24px;
       }
 
-      .odin-logo-svg {
-        width: 24px;
-        height: 24px;
-        display: block;
+      .odin-logo-img{
+        width:22px;
+        height:22px;
+        display:inline-block;
+        object-fit:contain;
+        border-radius:4px;
+      }
+      .odin-toggle-logo-img{
+        width:22px;
+        height:22px;
+        display:block;
+        object-fit:contain;
+        border-radius:6px;
       }
 
       .odin-header-close {
@@ -382,34 +388,6 @@
         color: #4b5563;
       }
 
-      .odin-api-modal-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-        padding: 16px 18px 0 18px;
-      }
-
-      .odin-api-modal-header h2 {
-        margin: 0;
-        padding: 0;
-      }
-
-      .odin-api-modal-close {
-        background: transparent;
-        border: 0;
-        color: #a0aec0;
-        font-size: 18px;
-        cursor: pointer;
-        padding: 6px 10px;
-        border-radius: 8px;
-      }
-
-      .odin-api-modal-close:hover {
-        background: rgba(255, 255, 255, 0.08);
-        color: #e2e8f0;
-      }
-
       .odin-api-modal-body {
         margin-top: 8px;
         margin-bottom: 12px;
@@ -511,24 +489,6 @@
         50% { opacity: 0.5; }
       }
     `;
-
-    // ============================================
-    // BRANDING
-    // ============================================
-    const ODIN_LOGO_SVG = `
-      <svg class="odin-logo-svg" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
-        <path d="M12 26c0-8 6-14 14-14h2l4-6 4 6h2c8 0 14 6 14 14v14c0 10-8 18-18 18H30c-10 0-18-8-18-18V26z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/>
-        <path d="M20 30c4-4 8-6 12-6s8 2 12 6" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
-        <path d="M26 38c2 2 4 3 6 3s4-1 6-3" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
-        <circle cx="26" cy="30" r="2.5" fill="currentColor"/>
-        <circle cx="38" cy="30" r="2.5" fill="currentColor"/>
-        <circle cx="38" cy="30" r="1.6" fill="#b91c1c"/>
-      </svg>
-    `;
-    function getLogoMarkup() {
-      return ODIN_LOGO_SVG;
-    }
-
 
     // ============================================
     // UI HELPERS
@@ -804,7 +764,7 @@
       buttonElement.className = 'odin-toggle-btn odin-menu-btn';
       buttonElement.id = 'odin-toggle-btn';
             buttonElement.innerHTML = `
-        <div class="odin-toggle-btn-icon">${getLogoMarkup()}</div>
+        <div class="odin-toggle-btn-icon"><img class="odin-toggle-logo-img" src="${ODIN_LOGO_URL}" alt="Odin" /></div>
         <div class="odin-toggle-btn-text">ODIN</div>
       `;
       buttonElement.title = 'Odin Tools';
@@ -905,7 +865,7 @@
       header.className = 'odin-header';
       header.innerHTML = `
         <div class="odin-header-title">
-          <span class="odin-header-logo">${getLogoMarkup()}</span>
+          <span class="odin-header-logo"><img class="odin-logo-img" src="${ODIN_LOGO_URL}" alt="Odin" /></span>
           <span>Odin Tools</span>
         </div>
         <button class="odin-header-close" id="odin-close">✕</button>
@@ -1186,17 +1146,21 @@
       // Header
       const headerWrap = document.createElement('div');
       headerWrap.className = 'odin-api-modal-header';
+      headerWrap.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;';
 
       const header = document.createElement('h2');
-      header.textContent = ' Welcome to Odin Tools';
+      header.textContent = 'Welcome to Odin Tools';
+      header.style.margin = '0';
+      header.style.fontSize = '18px';
 
       const closeBtn = document.createElement('button');
       closeBtn.type = 'button';
       closeBtn.className = 'odin-api-modal-close';
       closeBtn.textContent = '✕';
+      closeBtn.style.cssText = 'background:none;border:none;color:#a0aec0;font-size:18px;cursor:pointer;padding:6px 10px;border-radius:6px;';
       closeBtn.addEventListener('click', () => {
-        const bd = document.getElementById('odin-api-onboarding-backdrop');
-        if (bd) bd.remove();
+        const b = document.getElementById('odin-api-onboarding-backdrop');
+        if (b) b.remove();
       });
 
       headerWrap.appendChild(header);
@@ -1282,21 +1246,24 @@
       modal.appendChild(footer);
 
       backdrop.appendChild(modal);
-      backdrop.addEventListener('click', (e) => {
+      document.body.appendChild(backdrop);
+
+      // Close on backdrop click
+      backdrop.addEventListener('mousedown', (e) => {
         if (e.target === backdrop) {
           backdrop.remove();
         }
       });
-      document.body.appendChild(backdrop);
 
-      const onKeyDown = (e) => {
+      // Close on ESC
+      const onEsc = (e) => {
         if (e.key === 'Escape') {
-          const bd = document.getElementById('odin-api-onboarding-backdrop');
-          if (bd) bd.remove();
-          document.removeEventListener('keydown', onKeyDown);
+          const b = document.getElementById('odin-api-onboarding-backdrop');
+          if (b) b.remove();
+          document.removeEventListener('keydown', onEsc);
         }
       };
-      document.addEventListener('keydown', onKeyDown);
+      document.addEventListener('keydown', onEsc);
 
       // Focus input
       setTimeout(() => {
