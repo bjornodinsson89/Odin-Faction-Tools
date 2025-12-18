@@ -1,7 +1,7 @@
 /**
  * Odin Tools - Profile Injection UI
  * Injects Add to Targets, Claim, Med Deal buttons on user profiles and attack pages
- * Version: 4.1.0
+ * Version: 1.0.0
  * Author: BjornOdinsson89
  */
 
