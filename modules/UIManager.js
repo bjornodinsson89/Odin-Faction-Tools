@@ -104,13 +104,15 @@ function getSavedTornKey() {
           <div class="odin-card-header">
             <div class="odin-card-title">🔒 Authentication Required</div>
           </div>
-          <div class="odin-empty odin-auth-screen" style="text-align:left;">
-            <div class="odin-auth-info">
-              <div style="margin-bottom:10px;">This tab requires Firebase authentication for your faction.</div>
-              <div style="margin-bottom:10px; color:#a0a0a0; font-size:12px;">Status: ${status}</div>
+          <div class="odin-auth-shell">
+            <div class="odin-auth-top">
+              <div class="odin-auth-info">
+                <div style="margin-bottom:10px;">This tab requires Firebase authentication for your faction.</div>
+                <div style="margin-bottom:10px; color:#a0a0a0; font-size:12px;">Status: ${status}</div>
+              </div>
             </div>
 
-            <div class="odin-auth-scroll" aria-label="API key disclosure">
+            <div class="odin-auth-scrollbox" aria-label="API key disclosure">
               <div class="odin-auth-disclaimer-title">Torn API Key Usage &amp; Security Disclosure</div>
               <div class="odin-auth-disclaimer-body">
                 <h4>What a Torn API Key Is</h4>
@@ -133,7 +135,7 @@ function getSavedTornKey() {
               </div>
             </div>
 
-            <div class="odin-auth-footer">
+            <div class="odin-auth-bottom">
               <label class="odin-auth-ack">
                 <input type="checkbox" id="odin-auth-ack" />
                 I have read and understand how my Torn Full Access API key is used and stored.
@@ -150,7 +152,7 @@ function getSavedTornKey() {
 
               <div id="odin-auth-msg" class="odin-auth-msg"></div>
             </div>
-          </div>
+          </div></div>
         </div>`;
     }
 
@@ -386,6 +388,102 @@ function setMsg(t, kind) {
         .odin-content::-webkit-scrollbar { width: 6px; }
         .odin-content::-webkit-scrollbar-track { background: #1a1a2e; }
         .odin-content::-webkit-scrollbar-thumb { background: #e94560; border-radius: 3px; }
+
+
+/* Auth Screen: lock outer scroll, scroll only the disclaimer window */
+.odin-content.odin-content-auth {
+  overflow: hidden !important;
+  display: flex;
+  flex-direction: column;
+}
+.odin-content.odin-content-auth > .odin-card {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.odin-content.odin-content-auth .odin-card-header {
+  flex: 0 0 auto;
+}
+.odin-content.odin-content-auth .odin-auth-shell {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.odin-auth-top {
+  flex: 0 0 auto;
+  padding-bottom: 8px;
+}
+.odin-auth-scrollbox {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  border: 1px solid rgba(233, 69, 96, 0.25);
+  border-radius: 10px;
+  background: rgba(15, 15, 26, 0.55);
+  padding: 10px 12px;
+}
+.odin-auth-scrollbox::-webkit-scrollbar { width: 6px; }
+.odin-auth-scrollbox::-webkit-scrollbar-track { background: rgba(22,33,62,0.35); }
+.odin-auth-scrollbox::-webkit-scrollbar-thumb { background: rgba(233,69,96,0.9); border-radius: 3px; }
+
+.odin-auth-disclaimer-title {
+  font-weight: 700;
+  color: #fff;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+.odin-auth-disclaimer-body h4 {
+  margin: 10px 0 6px 0;
+  font-size: 12px;
+  color: #fff;
+}
+.odin-auth-disclaimer-body p {
+  margin: 0 0 8px 0;
+  font-size: 12px;
+  color: #cfcfcf;
+  line-height: 1.35;
+}
+.odin-auth-disclaimer-body code {
+  background: rgba(255,255,255,0.06);
+  padding: 1px 6px;
+  border-radius: 6px;
+  font-size: 11px;
+}
+
+.odin-auth-bottom {
+  flex: 0 0 auto;
+  padding-top: 10px;
+}
+.odin-auth-ack {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  font-size: 12px;
+  color: #d6d6d6;
+  line-height: 1.25;
+  user-select: none;
+}
+.odin-auth-ack input {
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  flex: 0 0 auto;
+}
+.odin-auth-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.odin-auth-actions .odin-btn {
+  flex: 1 1 0;
+  min-height: 40px;
+}
+.odin-auth-msg {
+  margin-top: 10px;
+  font-size: 12px;
+  color: #a0a0a0;
+}
 
         /* Common Components */
         .odin-card {
@@ -853,8 +951,12 @@ if (closeBtn) {
       const container = document.getElementById('odin-tab-content');
       if (!container) return;
 
+      // Ensure auth layout can lock the container scroll when needed
+      container.classList.remove('odin-content-auth');
+
       // Guard data-sensitive tabs until Firebase is connected AND auth user exists
       if (AUTH_REQUIRED_TABS.has(tabId) && !isAuthReady()) {
+        container.classList.add('odin-content-auth');
         container.innerHTML = renderAuthGate(tabId);
         attachAuthGateHandlers(tabId);
         return;
