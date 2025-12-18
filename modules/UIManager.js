@@ -1,8 +1,8 @@
 // ==============================================================================
-// ODIN UI MANAGER - Main UI Controller 
+// ODIN UI MANAGER - Main UI Controller
 // ==============================================================================
 // Manages the overlay panel, tabs, and all UI state
-// Version: 5.0.0 
+// Version: 5.0.0
 
 (function() {
   'use strict';
@@ -52,9 +52,48 @@
       return !!firebaseConnected && !!authUserPresent;
     }
 
-    function getSavedTornKey() {
-      try { return (ctx.api && typeof ctx.api.getTornApiKey === 'function') ? (ctx.api.getTornApiKey() || '') : ''; } catch (_) { return ''; }
+    function _secretKey(k) {
+  return 'odin_tools_secret:' + String(k || '').trim();
+}
+
+function _secretGet(k, defVal) {
+  const kk = _secretKey(k);
+  try {
+    if (typeof GM_getValue === 'function') return GM_getValue(kk, defVal);
+    const v = localStorage.getItem(kk);
+    return v === null ? defVal : v;
+  } catch (_) {
+    return defVal;
+  }
+}
+
+function _secretSet(k, val) {
+  const kk = _secretKey(k);
+  try {
+    if (typeof GM_setValue === 'function') GM_setValue(kk, val);
+    else localStorage.setItem(kk, String(val));
+  } catch (_) {}
+}
+
+function persistTornKey(key) {
+  const clean = (key == null) ? '' : String(key).trim();
+  if (!clean) return;
+  try {
+    if (ctx.api && typeof ctx.api.setTornApiKey === 'function') {
+      ctx.api.setTornApiKey(clean, { persist: true, silent: true });
+      return;
     }
+  } catch (_) {}
+  _secretSet('tornApiKey', clean);
+}
+
+function getSavedTornKey() {
+  try {
+    const fromApi = (ctx.api && typeof ctx.api.getTornApiKey === 'function') ? (ctx.api.getTornApiKey() || '') : '';
+    if (fromApi) return fromApi;
+  } catch (_) {}
+  return _secretGet('tornApiKey', '') || '';
+}
 
     function renderAuthGate(tabId) {
       const saved = getSavedTornKey();
@@ -65,31 +104,52 @@
           <div class="odin-card-header">
             <div class="odin-card-title">🔒 Authentication Required</div>
           </div>
-          <div class="odin-empty" style="text-align:left;">
-            <div style="margin-bottom:10px;">This tab requires Firebase authentication for your faction.</div>
-            <div style="margin-bottom:10px; color:#a0a0a0; font-size:12px;">Status: ${status}</div>
-            <div class="odin-auth-disclaimer">
-  <div class="odin-auth-disclaimer-title">API Key Security &amp; Storage (Read Carefully)</div>
-  <div class="odin-auth-disclaimer-body">
-    <p><strong>Why this key is needed:</strong> Odin Tools uses your Torn <strong>Full Access</strong> API key only to prove to our Firebase backend that you are a valid Torn player. The key is sent to the Odin Gatekeeper once to request a Firebase authentication token for your account/faction.</p>
-    <p><strong>How the key is used:</strong> When you press <em>Authenticate</em>, the script sends your key to the Torn API to validate it and to fetch your player/faction identifiers. The Gatekeeper then mints a Firebase custom token that allows read/write access limited by your identity and your faction permissions.</p>
-    <p><strong>How the key is stored:</strong> If you choose to save it, the key is stored locally on <strong>your device</strong> using the script’s storage layer (Tampermonkey/GreaseMonkey storage when available, otherwise browser storage). It is <strong>not</strong> stored in the database. It is used to re-authenticate if your Firebase session expires.</p>
-    <p><strong>Where the key can be exposed:</strong> Like any local secret, it can be exposed if your device is compromised, if your browser profile is synced/shared, or if you install malicious extensions/scripts. Treat it like a password. Do not paste it on shared devices.</p>
-    <p><strong>What to do if you change your mind:</strong> You can remove the saved key at any time using the script’s settings (or by clearing Tampermonkey storage / site storage). You can also regenerate your Torn API key in Torn immediately if you suspect compromise.</p>
-    <p><strong>Important:</strong> Until you acknowledge this notice, Odin Tools will not attempt authentication or load protected faction tabs.</p>
-  </div>
-</div>
-<label class="odin-auth-ack">
-  <input type="checkbox" id="odin-auth-ack" />
-  I have read and understand how my Torn Full Access API key is used and stored.
-</label>
-<label class="odin-form-label">Torn API Key (used once to mint a Firebase token)</label>
-            <input type="password" id="odin-auth-torn-key" class="odin-input" placeholder="${savedMasked ? 'Key saved (' + savedMasked + ') - paste to re-auth' : 'Paste your Torn API key'}" />
-            <div style="display:flex; gap:8px; margin-top:10px;">
-              <button class="odin-btn odin-btn-primary" id="odin-auth-btn">🔑 Authenticate</button>
-              <button class="odin-btn odin-btn-secondary" id="odin-auth-use-saved">Use Saved</button>
+          <div class="odin-empty odin-auth-screen" style="text-align:left;">
+            <div class="odin-auth-info">
+              <div style="margin-bottom:10px;">This tab requires Firebase authentication for your faction.</div>
+              <div style="margin-bottom:10px; color:#a0a0a0; font-size:12px;">Status: ${status}</div>
             </div>
-            <div id="odin-auth-msg" style="margin-top:10px; color:#a0a0a0; font-size:12px;"></div>
+
+            <div class="odin-auth-scroll" aria-label="API key disclosure">
+              <div class="odin-auth-disclaimer-title">Torn API Key Usage &amp; Security Disclosure</div>
+              <div class="odin-auth-disclaimer-body">
+                <h4>What a Torn API Key Is</h4>
+                <p>A Torn API key is a personal access token generated by your Torn City account. It allows third-party tools to request game data from Torn’s official API without using your Torn password.</p>
+                <p><strong>Important facts:</strong> Torn API keys do not grant account control, cannot perform gameplay actions (such as attacking, trading, or spending money), are commonly used by faction tools and war utilities, and can be revoked or regenerated at any time from your Torn account settings.</p>
+
+                <h4>How Odin Tools Uses Your API Key</h4>
+                <p>Odin Tools uses your API key to make direct, read-only requests to Torn’s official API from your browser. The key may be used to identify your player ID, identify your faction ID, fetch faction and war-related data required for Odin features, and enable live updates for war/chain tools.</p>
+                <p>All Torn API requests go directly to <code>api.torn.com</code>, are only made when a feature requires them, and Odin Tools does not automate gameplay or perform actions on your behalf.</p>
+
+                <h4>How Your API Key Is Stored</h4>
+                <p>When you authenticate, your API key is automatically saved locally on your device so you do not need to enter it again. The key is stored only in your browser and is used by the script to make Torn API requests as needed. You may remove or replace the key at any time by clearing local data or regenerating the key in Torn.</p>
+
+                <h4>One-Time Database Authentication</h4>
+                <p>Your Torn API key is used to authenticate you with Odin’s backend a single time. Your browser submits your API key for validation, Torn confirms your player ID and faction ID, and Odin issues a secure authentication token tied to your Torn identity.</p>
+                <p>All future database access uses this token instead of your API key. The API key is not used for ongoing database access. Database permissions are scoped to your Torn identity and faction. Regenerating your Torn API key immediately invalidates the authentication token.</p>
+
+                <h4>Your Consent</h4>
+                <p>By continuing, you acknowledge you understand what a Torn API key is, how Odin Tools uses and stores it, how the authentication process works, and you consent to using your API key for these purposes. If you are uncomfortable at any time, do not proceed, regenerate your Torn API key, or disable/remove Odin Tools.</p>
+              </div>
+            </div>
+
+            <div class="odin-auth-footer">
+              <label class="odin-auth-ack">
+                <input type="checkbox" id="odin-auth-ack" />
+                I have read and understand how my Torn Full Access API key is used and stored.
+              </label>
+
+              <label class="odin-form-label" style="margin-top:8px;">Torn API Key</label>
+              <input type="password" id="odin-auth-torn-key" class="odin-input"
+                placeholder="${saved ? ('Saved key detected (' + savedMasked + ') - paste to re-auth') : 'Paste your Torn API key'}" />
+
+              <div class="odin-auth-actions">
+                <button class="odin-btn odin-btn-primary" id="odin-auth-btn">🔑 Authenticate</button>
+                <button class="odin-btn odin-btn-secondary" id="odin-auth-use-saved">Use Saved</button>
+              </div>
+
+              <div id="odin-auth-msg" class="odin-auth-msg"></div>
+            </div>
           </div>
         </div>`;
     }
@@ -145,9 +205,7 @@ function setMsg(t, kind) {
               setMsg('Please paste a valid Torn API key.', 'error');
               return;
             }
-            if (ctx.api && typeof ctx.api.setTornApiKey === 'function') {
-              ctx.api.setTornApiKey(key, { persist: true, silent: true });
-            }
+            persistTornKey(key);
             if (!ctx.firebase || typeof ctx.firebase.authenticateWithTorn !== 'function') {
               setMsg('Firebase service is not ready yet. Try again in a moment.', 'error');
               return;
@@ -585,6 +643,74 @@ function setMsg(t, kind) {
       
 
 /* Mobile Responsiveness */
+
+        /* Auth Gate Layout */
+        .odin-auth-screen {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+          min-height: 460px;
+        }
+        .odin-auth-info {
+          flex: 0 0 auto;
+        }
+        .odin-auth-scroll {
+          flex: 1 1 auto;
+          overflow: auto;
+          border: 1px solid rgba(233, 69, 96, 0.35);
+          background: rgba(0,0,0,0.25);
+          border-radius: 12px;
+          padding: 12px;
+        }
+        .odin-auth-disclaimer-title {
+          font-weight: 700;
+          margin-bottom: 10px;
+          color: #f0f0f0;
+        }
+        .odin-auth-disclaimer-body h4 {
+          margin: 12px 0 6px;
+          font-size: 13px;
+          color: #f0f0f0;
+        }
+        .odin-auth-disclaimer-body p {
+          margin: 0 0 10px;
+          color: #d6d6d6;
+          font-size: 12px;
+          line-height: 1.45;
+        }
+        .odin-auth-disclaimer-body code {
+          font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+          font-size: 11px;
+          color: #ffffff;
+          background: rgba(255,255,255,0.08);
+          padding: 1px 6px;
+          border-radius: 8px;
+        }
+        .odin-auth-footer {
+          flex: 0 0 auto;
+        }
+        .odin-auth-actions {
+          display: flex;
+          gap: 8px;
+          margin-top: 10px;
+        }
+        .odin-auth-actions .odin-btn {
+          flex: 1;
+          min-height: 44px;
+        }
+        .odin-auth-msg {
+          margin-top: 10px;
+          color: #a0a0a0;
+          font-size: 12px;
+        }
+
+        @media (max-width: 768px) {
+          .odin-auth-screen { min-height: 420px; }
+          .odin-auth-scroll { padding: 10px; }
+          .odin-auth-disclaimer-body p { font-size: 12px; }
+          .odin-auth-actions .odin-btn { min-height: 48px; }
+        }
+
 @media (max-width: 768px) {
   #odin-panel {
     left: 50%;
