@@ -1,5 +1,5 @@
 /**
- * Odin Tools - Freki AI Target Scoring Engine (FIXED VERSION)
+ * Odin Tools - Freki AI Target Scoring Engine 
  * Self-learning neural network for target analysis
  * Version: 4.2.0
  * Author: BjornOdinsson89
