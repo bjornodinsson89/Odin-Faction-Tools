@@ -68,7 +68,22 @@
           <div class="odin-empty" style="text-align:left;">
             <div style="margin-bottom:10px;">This tab requires Firebase authentication for your faction.</div>
             <div style="margin-bottom:10px; color:#a0a0a0; font-size:12px;">Status: ${status}</div>
-            <label class="odin-form-label">Torn API Key (used once to mint a Firebase token)</label>
+            <div class="odin-auth-disclaimer">
+  <div class="odin-auth-disclaimer-title">API Key Security &amp; Storage (Read Carefully)</div>
+  <div class="odin-auth-disclaimer-body">
+    <p><strong>Why this key is needed:</strong> Odin Tools uses your Torn <strong>Full Access</strong> API key only to prove to our Firebase backend that you are a valid Torn player. The key is sent to the Odin Gatekeeper once to request a Firebase authentication token for your account/faction.</p>
+    <p><strong>How the key is used:</strong> When you press <em>Authenticate</em>, the script sends your key to the Torn API to validate it and to fetch your player/faction identifiers. The Gatekeeper then mints a Firebase custom token that allows read/write access limited by your identity and your faction permissions.</p>
+    <p><strong>How the key is stored:</strong> If you choose to save it, the key is stored locally on <strong>your device</strong> using the script’s storage layer (Tampermonkey/GreaseMonkey storage when available, otherwise browser storage). It is <strong>not</strong> stored in the database. It is used to re-authenticate if your Firebase session expires.</p>
+    <p><strong>Where the key can be exposed:</strong> Like any local secret, it can be exposed if your device is compromised, if your browser profile is synced/shared, or if you install malicious extensions/scripts. Treat it like a password. Do not paste it on shared devices.</p>
+    <p><strong>What to do if you change your mind:</strong> You can remove the saved key at any time using the script’s settings (or by clearing Tampermonkey storage / site storage). You can also regenerate your Torn API key in Torn immediately if you suspect compromise.</p>
+    <p><strong>Important:</strong> Until you acknowledge this notice, Odin Tools will not attempt authentication or load protected faction tabs.</p>
+  </div>
+</div>
+<label class="odin-auth-ack">
+  <input type="checkbox" id="odin-auth-ack" />
+  I have read and understand how my Torn Full Access API key is used and stored.
+</label>
+<label class="odin-form-label">Torn API Key (used once to mint a Firebase token)</label>
             <input type="password" id="odin-auth-torn-key" class="odin-input" placeholder="${savedMasked ? 'Key saved (' + savedMasked + ') - paste to re-auth' : 'Paste your Torn API key'}" />
             <div style="display:flex; gap:8px; margin-top:10px;">
               <button class="odin-btn odin-btn-primary" id="odin-auth-btn">🔑 Authenticate</button>
@@ -84,7 +99,25 @@
       const input = document.getElementById('odin-auth-torn-key');
       const btn = document.getElementById('odin-auth-btn');
       const useSaved = document.getElementById('odin-auth-use-saved');
-      function setMsg(t, kind) {
+      const ack = document.getElementById('odin-auth-ack');
+      const ackKey = 'odin_auth_ack_v1';
+      if (ack && storage && typeof storage.getJSON === 'function') {
+        const prior = storage.getJSON(ackKey);
+        if (prior === true) ack.checked = true;
+      }
+      function applyAckState() {
+        const ok = !!(ack && ack.checked);
+        if (btn) btn.disabled = !ok;
+        if (useSaved) useSaved.disabled = !ok;
+        if (!ok) setMsg('Please read the notice and acknowledge it to enable authentication.', 'info');
+        if (ok && msg && msg.textContent && msg.textContent.indexOf('acknowledge') !== -1) setMsg('', 'info');
+        if (storage && typeof storage.setJSON === 'function') storage.setJSON(ackKey, ok);
+      }
+      if (ack) {
+        ack.addEventListener('change', applyAckState, { passive: true });
+      }
+      applyAckState();
+function setMsg(t, kind) {
         if (!msg) return;
         msg.textContent = t || '';
         msg.style.color = kind === 'error' ? '#ff6b6b' : (kind === 'success' ? '#2ecc71' : '#a0a0a0');
@@ -101,6 +134,11 @@
       if (btn) {
         btn.onclick = async () => {
           try {
+            const ok = !!(ack && ack.checked);
+            if (!ok) {
+              setMsg('Please acknowledge the notice before authenticating.', 'error');
+              return;
+            }
             setMsg('Authenticating...', 'info');
             const key = (input && input.value) ? input.value.trim() : '';
             if (!key || key.length < 16) {
@@ -137,45 +175,38 @@
       styles.textContent = `
         /* Toggle Button */
         #odin-toggle-btn {
-          position: fixed;
-          left: 10px;
-          bottom: 10px;
-          width: 40px;
-          height: 40px;
-          border-radius: 50%;
-          background: #0f0f1a;
-          border: 2px solid #e94560;
-          cursor: pointer;
-          z-index: 9999;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          padding: 0;
-          box-shadow: 0 4px 15px rgba(0, 0, 0, 0.45);
-          transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
-          touch-action: manipulation;
-          -webkit-tap-highlight-color: transparent;
-        }
+  position: fixed;
+  left: 10px;
+  bottom: 10px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  border: 2px solid #e94560;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 9999;
+  padding: 0;
+  overflow: hidden;
+}
+#odin-toggle-btn img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
         #odin-toggle-btn:hover {
-          transform: scale(1.06);
-          box-shadow: 0 6px 20px rgba(0, 0, 0, 0.55);
-        }
-        #odin-toggle-btn:active {
-          transform: scale(0.98);
+          transform: scale(1.1);
+          box-shadow: 0 6px 20px rgba(233, 69, 96, 0.6);
         }
         #odin-toggle-btn.active {
           background: linear-gradient(135deg, #e94560 0%, #c73e54 100%);
         }
-        #odin-toggle-btn img {
-          width: 100%;
-          height: 100%;
-          border-radius: 50%;
-          object-fit: cover;
-          display: block;
-          pointer-events: none;
-          user-select: none;
-        }
-/* Main Panel */
+
+        /* Main Panel */
         #odin-panel {
           position: fixed;
           top: 60px;
@@ -213,38 +244,41 @@
           font-size: 18px;
           font-weight: 600;
         }
-        .odin-header-status {
-          display: flex;
-          align-items: center;
-          gap: 8px;
+        
+        .odin-header-logo {
+          width: 22px;
+          height: 22px;
+          border-radius: 6px;
+          object-fit: cover;
+          margin-right: 8px;
+          display: block;
+          flex: 0 0 auto;
         }
         .odin-close-btn {
-          width: 36px;
-          height: 36px;
-          margin-left: 10px;
+          width: 40px;
+          height: 40px;
           border-radius: 10px;
-          border: 1px solid rgba(255, 255, 255, 0.18);
-          background: rgba(255, 255, 255, 0.08);
+          border: 1px solid rgba(233, 69, 96, 0.45);
+          background: rgba(233, 69, 96, 0.12);
           color: #fff;
-          cursor: pointer;
-          display: inline-flex;
+          font-size: 22px;
+          line-height: 1;
+          display: flex;
           align-items: center;
           justify-content: center;
-          font-size: 18px;
-          line-height: 1;
-          transition: background 0.15s ease, transform 0.15s ease, border-color 0.15s ease;
-          touch-action: manipulation;
-          -webkit-tap-highlight-color: transparent;
-        }
-        .odin-close-btn:hover {
-          background: rgba(233, 69, 96, 0.18);
-          border-color: rgba(233, 69, 96, 0.5);
+          cursor: pointer;
+          margin-left: 10px;
+          flex: 0 0 auto;
         }
         .odin-close-btn:active {
           transform: scale(0.98);
         }
-
-.odin-status-dot {
+.odin-header-status {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .odin-status-dot {
           width: 8px;
           height: 8px;
           border-radius: 50%;
@@ -549,81 +583,70 @@
         .odin-member-name { color: #60a5fa; font-size: 13px; }
         .odin-member-status { font-size: 11px; }
       
-        /* Mobile Responsiveness */
-        @media (max-width: 768px) {
-          #odin-panel {
-            left: 50%;
-            right: auto;
-            top: 10px;
-            transform: translateX(-50%);
-            width: 92vw;
-            max-height: 90vh;
-            border-radius: 12px;
-          }
 
-          .odin-header {
-            padding: 10px 12px;
-          }
-          .odin-header-title {
-            font-size: 16px;
-          }
+/* Mobile Responsiveness */
+@media (max-width: 768px) {
+  #odin-panel {
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+    width: 95vw;
+    top: 54px;
+    max-height: 72vh;
+    border-radius: 14px;
+  }
 
-          .odin-tabs {
-            flex-direction: column;
-            flex-wrap: nowrap;
-            gap: 6px;
-            max-height: 150px;
-            overflow-y: auto;
-            padding: 10px;
-            -webkit-overflow-scrolling: touch;
-          }
-          .odin-tab {
-            flex: 0 0 auto;
-            min-width: 0;
-            width: 100%;
-            text-align: left;
-            padding: 12px 12px;
-            font-size: 13px;
-            border-radius: 8px;
-          }
+  .odin-header {
+    padding: 10px 12px;
+  }
 
-          .odin-content {
-            padding: 12px;
-            max-height: none;
-            overflow-y: auto;
-            -webkit-overflow-scrolling: touch;
-          }
+  .odin-header-title {
+    font-size: 16px;
+  }
 
-          .odin-btn {
-            min-height: 44px;
-            padding: 10px 14px;
-            font-size: 14px;
-            border-radius: 10px;
-          }
-          .odin-btn-small {
-            min-height: 36px;
-            padding: 8px 12px;
-            font-size: 13px;
-          }
+  .odin-close-btn {
+    width: 44px;
+    height: 44px;
+  }
 
-          .odin-input,
-          .odin-select {
-            min-height: 44px;
-            font-size: 14px;
-            border-radius: 10px;
-          }
+  .odin-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    padding: 6px 8px;
+    gap: 6px;
+  }
 
-          .odin-target-actions {
-            gap: 8px;
-          }
+  .odin-tabs::-webkit-scrollbar { height: 6px; }
+  .odin-tabs::-webkit-scrollbar-track { background: #1a1a2e; }
+  .odin-tabs::-webkit-scrollbar-thumb { background: rgba(233, 69, 96, 0.8); border-radius: 3px; }
 
-          .odin-toast {
-            left: 12px;
-            right: 12px;
-            bottom: 60px;
-            text-align: center;
-          }
-        }
+  .odin-tab {
+    flex: 0 0 auto;
+    min-width: 120px;
+    padding: 8px 10px;
+    font-size: 12px;
+  }
+
+  .odin-content {
+    padding: 12px;
+    max-height: none;
+  }
+
+  .odin-btn {
+    padding: 12px 14px;
+    font-size: 14px;
+    border-radius: 10px;
+  }
+
+  input.odin-input, textarea.odin-input, select.odin-input,
+  input.odin-form-input, textarea.odin-form-input, select.odin-form-input {
+    font-size: 16px;
+    padding: 12px 12px;
+  }
+}
+
 `;
       document.head.appendChild(styles);
     }
@@ -634,10 +657,8 @@
     function createToggleButton() {
       toggleButton = document.createElement('button');
       toggleButton.id = 'odin-toggle-btn';
-      toggleButton.type = 'button';
-      toggleButton.title = 'Odin Tools';
-      toggleButton.setAttribute('aria-label', 'Open Odin Tools');
-      toggleButton.innerHTML = '<img alt="Odin Tools" src="https://i.postimg.cc/BQ6bSYKM/file-000000004bb071f5a96fc52564bf26ad-(1).png">';
+      toggleButton.innerHTML = `<img src=\"https://i.postimg.cc/BQ6bSYKM/file-000000004bb071f5a96fc52564bf26ad-(1).png\" alt=\"Odin Tools\" />`;
+      toggleButton.title = 'Odin Faction Tools';
       toggleButton.onclick = togglePanel;
       document.body.appendChild(toggleButton);
     }
@@ -651,7 +672,7 @@
       panelElement.innerHTML = `
         <div class="odin-header">
           <div class="odin-header-title">
-            <span>🛡️</span>
+            <img class="odin-header-logo" src="https://i.postimg.cc/BQ6bSYKM/file-000000004bb071f5a96fc52564bf26ad-(1).png" alt="Odin Tools" />
             <span>Odin Tools</span>
           </div>
           <div class="odin-header-status">
@@ -660,7 +681,7 @@
               ${connectionStatus === 'connected' ? 'Online' : 'Connecting...'}
             </span>
           </div>
-            <button class="odin-close-btn" id="odin-close-btn" type="button" title="Close" aria-label="Close Odin Tools">✕</button>
+        <button id="odin-panel-close" class="odin-close-btn" title="Close">✕</button>
         </div>
         <div class="odin-tabs">
           ${Object.entries(tabs).map(([id, tab]) => `
@@ -674,20 +695,21 @@
         </div>
       `;
 
-      // Tab click handlers
+      
+
+const closeBtn = panelElement.querySelector('#odin-panel-close');
+if (closeBtn) {
+  closeBtn.addEventListener('click', () => {
+    hidePanel();
+  }, { passive: true });
+}
+// Tab click handlers
       panelElement.querySelectorAll('.odin-tab').forEach(tab => {
         tab.onclick = () => switchTab(tab.dataset.tab);
       });
 
       document.body.appendChild(panelElement);
-      
-      // Close button handler (prominent for mobile)
-      const closeBtn = panelElement.querySelector('#odin-close-btn');
-      if (closeBtn) {
-        closeBtn.onclick = () => hidePanel();
-      }
-
-renderTabContent(activeTab);
+      renderTabContent(activeTab);
     }
 
     function switchTab(tabId) {
@@ -1323,7 +1345,6 @@ renderTabContent(activeTab);
       isVisible = !isVisible;
       panelElement.classList.toggle('visible', isVisible);
       toggleButton.classList.toggle('active', isVisible);
-      if (toggleButton) toggleButton.setAttribute('aria-label', isVisible ? 'Close Odin Tools' : 'Open Odin Tools');
       
       if (isVisible) {
         renderTabContent(activeTab);
