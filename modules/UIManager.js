@@ -1,8 +1,8 @@
 // ==============================================================================
-// ODIN UI MANAGER - Main UI Controller (FIXED VERSION)
+// ODIN UI MANAGER - Main UI Controller 
 // ==============================================================================
 // Manages the overlay panel, tabs, and all UI state
-// Version: 4.2.0 - Fixed API key save bug, completed all tabs
+// Version: 4.2.0 
 
 (function() {
   'use strict';
