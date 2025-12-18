@@ -1,8 +1,8 @@
 // ==============================================================================
-// ODIN UI MANAGER - Main UI Controller (FIXED VERSION)
+// ODIN UI MANAGER - Main UI Controller 
 // ==============================================================================
 // Manages the overlay panel, tabs, and all UI state
-// Version: 5.0.0 - Fixed API key save bug, completed all tabs
+// Version: 5.0.0 
 
 (function() {
   'use strict';
@@ -138,31 +138,44 @@
         /* Toggle Button */
         #odin-toggle-btn {
           position: fixed;
-          bottom: 20px;
-          right: 20px;
-          width: 56px;
-          height: 56px;
+          left: 10px;
+          bottom: 10px;
+          width: 40px;
+          height: 40px;
           border-radius: 50%;
-          background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+          background: #0f0f1a;
           border: 2px solid #e94560;
           cursor: pointer;
-          z-index: 99999;
+          z-index: 9999;
           display: flex;
           align-items: center;
           justify-content: center;
-          font-size: 28px;
-          box-shadow: 0 4px 15px rgba(233, 69, 96, 0.4);
-          transition: all 0.3s ease;
+          padding: 0;
+          box-shadow: 0 4px 15px rgba(0, 0, 0, 0.45);
+          transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+          touch-action: manipulation;
+          -webkit-tap-highlight-color: transparent;
         }
         #odin-toggle-btn:hover {
-          transform: scale(1.1);
-          box-shadow: 0 6px 20px rgba(233, 69, 96, 0.6);
+          transform: scale(1.06);
+          box-shadow: 0 6px 20px rgba(0, 0, 0, 0.55);
+        }
+        #odin-toggle-btn:active {
+          transform: scale(0.98);
         }
         #odin-toggle-btn.active {
           background: linear-gradient(135deg, #e94560 0%, #c73e54 100%);
         }
-
-        /* Main Panel */
+        #odin-toggle-btn img {
+          width: 100%;
+          height: 100%;
+          border-radius: 50%;
+          object-fit: cover;
+          display: block;
+          pointer-events: none;
+          user-select: none;
+        }
+/* Main Panel */
         #odin-panel {
           position: fixed;
           top: 60px;
@@ -205,7 +218,33 @@
           align-items: center;
           gap: 8px;
         }
-        .odin-status-dot {
+        .odin-close-btn {
+          width: 36px;
+          height: 36px;
+          margin-left: 10px;
+          border-radius: 10px;
+          border: 1px solid rgba(255, 255, 255, 0.18);
+          background: rgba(255, 255, 255, 0.08);
+          color: #fff;
+          cursor: pointer;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 18px;
+          line-height: 1;
+          transition: background 0.15s ease, transform 0.15s ease, border-color 0.15s ease;
+          touch-action: manipulation;
+          -webkit-tap-highlight-color: transparent;
+        }
+        .odin-close-btn:hover {
+          background: rgba(233, 69, 96, 0.18);
+          border-color: rgba(233, 69, 96, 0.5);
+        }
+        .odin-close-btn:active {
+          transform: scale(0.98);
+        }
+
+.odin-status-dot {
           width: 8px;
           height: 8px;
           border-radius: 50%;
@@ -509,7 +548,83 @@
         }
         .odin-member-name { color: #60a5fa; font-size: 13px; }
         .odin-member-status { font-size: 11px; }
-      `;
+      
+        /* Mobile Responsiveness */
+        @media (max-width: 768px) {
+          #odin-panel {
+            left: 50%;
+            right: auto;
+            top: 10px;
+            transform: translateX(-50%);
+            width: 92vw;
+            max-height: 90vh;
+            border-radius: 12px;
+          }
+
+          .odin-header {
+            padding: 10px 12px;
+          }
+          .odin-header-title {
+            font-size: 16px;
+          }
+
+          .odin-tabs {
+            flex-direction: column;
+            flex-wrap: nowrap;
+            gap: 6px;
+            max-height: 150px;
+            overflow-y: auto;
+            padding: 10px;
+            -webkit-overflow-scrolling: touch;
+          }
+          .odin-tab {
+            flex: 0 0 auto;
+            min-width: 0;
+            width: 100%;
+            text-align: left;
+            padding: 12px 12px;
+            font-size: 13px;
+            border-radius: 8px;
+          }
+
+          .odin-content {
+            padding: 12px;
+            max-height: none;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+          }
+
+          .odin-btn {
+            min-height: 44px;
+            padding: 10px 14px;
+            font-size: 14px;
+            border-radius: 10px;
+          }
+          .odin-btn-small {
+            min-height: 36px;
+            padding: 8px 12px;
+            font-size: 13px;
+          }
+
+          .odin-input,
+          .odin-select {
+            min-height: 44px;
+            font-size: 14px;
+            border-radius: 10px;
+          }
+
+          .odin-target-actions {
+            gap: 8px;
+          }
+
+          .odin-toast {
+            left: 12px;
+            right: 12px;
+            bottom: 60px;
+            text-align: center;
+          }
+        }
+`;
       document.head.appendChild(styles);
     }
 
@@ -519,8 +634,10 @@
     function createToggleButton() {
       toggleButton = document.createElement('button');
       toggleButton.id = 'odin-toggle-btn';
-      toggleButton.innerHTML = '🛡️';
-      toggleButton.title = 'Odin Faction Tools';
+      toggleButton.type = 'button';
+      toggleButton.title = 'Odin Tools';
+      toggleButton.setAttribute('aria-label', 'Open Odin Tools');
+      toggleButton.innerHTML = '<img alt="Odin Tools" src="https://i.postimg.cc/BQ6bSYKM/file-000000004bb071f5a96fc52564bf26ad-(1).png">';
       toggleButton.onclick = togglePanel;
       document.body.appendChild(toggleButton);
     }
@@ -543,6 +660,7 @@
               ${connectionStatus === 'connected' ? 'Online' : 'Connecting...'}
             </span>
           </div>
+            <button class="odin-close-btn" id="odin-close-btn" type="button" title="Close" aria-label="Close Odin Tools">✕</button>
         </div>
         <div class="odin-tabs">
           ${Object.entries(tabs).map(([id, tab]) => `
@@ -562,7 +680,14 @@
       });
 
       document.body.appendChild(panelElement);
-      renderTabContent(activeTab);
+      
+      // Close button handler (prominent for mobile)
+      const closeBtn = panelElement.querySelector('#odin-close-btn');
+      if (closeBtn) {
+        closeBtn.onclick = () => hidePanel();
+      }
+
+renderTabContent(activeTab);
     }
 
     function switchTab(tabId) {
@@ -1198,6 +1323,7 @@
       isVisible = !isVisible;
       panelElement.classList.toggle('visible', isVisible);
       toggleButton.classList.toggle('active', isVisible);
+      if (toggleButton) toggleButton.setAttribute('aria-label', isVisible ? 'Close Odin Tools' : 'Open Odin Tools');
       
       if (isVisible) {
         renderTabContent(activeTab);
