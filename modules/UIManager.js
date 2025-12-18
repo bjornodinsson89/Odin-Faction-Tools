@@ -2,7 +2,7 @@
 // ODIN UI MANAGER - Main UI Controller (FIXED VERSION)
 // ==============================================================================
 // Manages the overlay panel, tabs, and all UI state
-// Version: 5.0.0 - Fixed API key save bug, completed all tabs
+// Version: 5.0.0 
 (function() {
   'use strict';
 
@@ -224,9 +224,9 @@
         #odin-toggle-btn {
           position: fixed;
           bottom: 20px;
-          right: 20px;
-          width: 56px;
-          height: 56px;
+          left: 20px;
+          width: 48px;
+          height: 48px;
           border-radius: 50%;
           background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
           border: 2px solid #e94560;
@@ -235,7 +235,7 @@
           display: flex;
           align-items: center;
           justify-content: center;
-          font-size: 28px;
+          font-size: 0;
           box-shadow: 0 4px 15px rgba(233, 69, 96, 0.4);
           transition: all 0.3s ease;
         }
@@ -253,6 +253,7 @@
           top: 60px;
           right: 20px;
           width: 440px;
+                    max-width: calc(100vw - 40px);
           max-height: calc(100vh - 100px);
           background: linear-gradient(180deg, #1a1a2e 0%, #0f0f1a 100%);
           border: 1px solid #e94560;
@@ -301,14 +302,16 @@
         /* Tab Navigation */
         .odin-tabs {
           display: flex;
-          flex-wrap: wrap;
+          flex-wrap: nowrap;
+          overflow-x: auto;
           gap: 4px;
           padding: 8px;
           background: #16213e;
           border-bottom: 1px solid rgba(233, 69, 96, 0.3);
         }
         .odin-tab {
-          flex: 1;
+          flex: 0 0 auto;
+          white-space: nowrap;
           min-width: 70px;
           padding: 8px 10px;
           background: transparent;
@@ -688,7 +691,7 @@
     function createToggleButton() {
       toggleButton = document.createElement('button');
       toggleButton.id = 'odin-toggle-btn';
-      toggleButton.innerHTML = '🛡️';
+      toggleButton.innerHTML = '<img src="https://i.postimg.cc/BQ6bSYKM/file-000000004bb071f5a96fc52564bf26ad-(1).png" alt="Odin" style="width:28px;height:28px;display:block;" />';
       toggleButton.title = 'Odin Faction Tools';
       toggleButton.onclick = togglePanel;
       document.body.appendChild(toggleButton);
@@ -703,7 +706,7 @@
       panelElement.innerHTML = `
         <div class="odin-header">
           <div class="odin-header-title">
-            <span>🛡️</span>
+            <img src="https://i.postimg.cc/BQ6bSYKM/file-000000004bb071f5a96fc52564bf26ad-(1).png" alt="Odin" style="width:22px;height:22px;display:block;" />
             <span>Odin Tools</span>
           </div>
           <div class="odin-header-status">
