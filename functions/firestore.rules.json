@@ -1,0 +1,35 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAuthed() {
+      return request.auth != null;
+    }
+
+    function factionMatch(factionId) {
+      return isAuthed() && request.auth.token.factionId == factionId;
+    }
+
+    // Per-user documents (private to the signed-in user)
+    match /users/{userId}/{document=**} {
+      allow read, write: if isAuthed() && request.auth.uid == userId;
+    }
+
+    // Faction-scoped documents (read only by default)
+    match /factions/{factionId}/{document=**} {
+      allow read: if factionMatch(factionId);
+      allow write: if false;
+    }
+
+    // Public, read-only Freki models
+    match /freki/models/{document=**} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

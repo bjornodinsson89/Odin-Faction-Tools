@@ -1,0 +1,39 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "factions": {
+      "$factionId": {
+        ".read": "auth != null && auth.token.factionId === $factionId",
+        ".write": false,
+        "roles": {
+          "$uid": {
+            ".read": "auth != null && auth.token.factionId === $factionId && auth.uid === $uid",
+            ".write": "auth != null && auth.token.factionId === $factionId && (root.child('factions/'+$factionId+'/roles/'+auth.uid).val() === 'Developer' || root.child('factions/'+$factionId+'/roles/'+auth.uid).val() === 'Leader')",
+            ".validate": "newData.isString() && (newData.val() === 'Developer' || newData.val() === 'Leader' || newData.val() === 'Admin' || newData.val() === 'Member')"
+          }
+        },
+        "claims": {
+          "$claimId": {
+            ".read": "auth != null && auth.token.factionId === $factionId",
+            ".write": "auth != null && auth.token.factionId === $factionId && ((!data.exists() && newData.child('claimedBy').val() === auth.uid) || (data.exists() && data.child('claimedBy').val() === auth.uid && newData.child('claimedBy').val() === auth.uid) || (root.child('factions/'+$factionId+'/roles/'+auth.uid).val() === 'Developer' || root.child('factions/'+$factionId+'/roles/'+auth.uid).val() === 'Leader' || root.child('factions/'+$factionId+'/roles/'+auth.uid).val() === 'Admin'))",
+            ".validate": "newData.hasChildren(['claimedBy','targetId','type','createdAt']) && newData.child('claimedBy').isString() && newData.child('claimedBy').val().length > 0 && newData.child('targetId').isString() && newData.child('type').isString()"
+          }
+        },
+        "targets": {
+          "$targetId": {
+            ".read": "auth != null && auth.token.factionId === $factionId",
+            ".write": "auth != null && auth.token.factionId === $factionId && ((!data.exists() && newData.child('addedBy').val() === auth.uid) || (data.exists() && data.child('addedBy').val() === auth.uid) || (root.child('factions/'+$factionId+'/roles/'+auth.uid).val() === 'Developer' || root.child('factions/'+$factionId+'/roles/'+auth.uid).val() === 'Leader' || root.child('factions/'+$factionId+'/roles/'+auth.uid).val() === 'Admin'))",
+            ".validate": "newData.hasChildren(['addedBy','addedAt']) && newData.child('addedBy').isString()"
+          }
+        },
+        "schedule": {
+          "$day": {
+            ".read": "auth != null && auth.token.factionId === $factionId",
+            ".write": "auth != null && auth.token.factionId === $factionId"
+          }
+        }
+      }
+    }
+  }
+}
