@@ -3,6 +3,9 @@
    - Initializes Firebase compat SDK
    - Calls Gatekeeper Cloud Function authenticateWithTorn (one-time API key use)
    - Tracks RTDB connectivity and auth state
+   - Emits Nexus events:
+       FIREBASE_CONNECTED / FIREBASE_DISCONNECTED
+       AUTH_STATE_CHANGED
    ============================================================ */
 (function () {
   'use strict';
@@ -19,73 +22,13 @@
     appId: "1:559747349324:web:ec1c7d119e5fd50443ade9"
   };
 
-  /* =========================
-     Firebase Compat Loader
-     ========================= */
-  const FIREBASE_COMPAT_VERSION = '9.23.0';
-  const FIREBASE_COMPAT_URLS = [
-    `https://www.gstatic.com/firebasejs/${FIREBASE_COMPAT_VERSION}/firebase-app-compat.js`,
-    `https://www.gstatic.com/firebasejs/${FIREBASE_COMPAT_VERSION}/firebase-auth-compat.js`,
-    `https://www.gstatic.com/firebasejs/${FIREBASE_COMPAT_VERSION}/firebase-database-compat.js`,
-    `https://www.gstatic.com/firebasejs/${FIREBASE_COMPAT_VERSION}/firebase-firestore-compat.js`,
-    `https://www.gstatic.com/firebasejs/${FIREBASE_COMPAT_VERSION}/firebase-functions-compat.js`
-  ];
-
-  let _firebaseLoadPromise = null;
-
-  function _injectScript(src) {
-    return new Promise((resolve, reject) => {
-      try {
-        const existing = document.querySelector(`script[data-odin-firebase="${src}"]`) || document.querySelector(`script[src="${src}"]`);
-        if (existing) {
-          if (existing.getAttribute('data-odin-loaded') === '1') return resolve(true);
-          existing.addEventListener('load', () => resolve(true), { once: true });
-          existing.addEventListener('error', () => reject(new Error(`Failed to load ${src}`)), { once: true });
-          return;
-        }
-
-        const s = document.createElement('script');
-        s.src = src;
-        s.async = false;
-        s.defer = false;
-        s.type = 'text/javascript';
-        s.setAttribute('data-odin-firebase', src);
-        s.addEventListener('load', () => {
-          try { s.setAttribute('data-odin-loaded', '1'); } catch (_) {}
-          resolve(true);
-        }, { once: true });
-        s.addEventListener('error', () => reject(new Error(`Failed to load ${src}`)), { once: true });
-        (document.head || document.documentElement).appendChild(s);
-      } catch (e) {
-        reject(e);
-      }
-    });
-  }
-
-  function _hasFirebaseCompatReady() {
-    return !!(
-      window.firebase &&
-      typeof window.firebase.initializeApp === 'function' &&
-      typeof window.firebase.auth === 'function' &&
-      typeof window.firebase.database === 'function' &&
-      typeof window.firebase.firestore === 'function' &&
-      typeof window.firebase.functions === 'function'
-    );
-  }
-
   function ensureFirebaseCompat() {
-    if (_hasFirebaseCompatReady()) return Promise.resolve(true);
-    if (_firebaseLoadPromise) return _firebaseLoadPromise;
-    _firebaseLoadPromise = (async () => {
-      for (const url of FIREBASE_COMPAT_URLS) {
-        await _injectScript(url);
-      }
-      if (!_hasFirebaseCompatReady()) {
-        throw new Error('Firebase compat SDK failed to initialize after loading scripts');
-      }
-      return true;
-    })();
-    return _firebaseLoadPromise;
+    if (typeof window.firebase === 'undefined' || !window.firebase) {
+      throw new Error('Firebase compat SDK not loaded (firebase is undefined)');
+    }
+    if (typeof window.firebase.initializeApp !== 'function') {
+      throw new Error('Firebase compat SDK missing initializeApp()');
+    }
   }
 
   function safeStr(v) {
@@ -161,21 +104,7 @@
     }
 
     function initFirebase() {
-      if (store.get('firebase.initialized')) return true;
-
-      if (!_hasFirebaseCompatReady()) {
-        ensureFirebaseCompat()
-          .then(() => {
-            try { initFirebase(); } catch (e) {
-              try { nexus && nexus.emit && nexus.emit('FIREBASE_DISCONNECTED', { error: e && e.message ? e.message : String(e) }); } catch (_) {}
-            }
-          })
-          .catch((e) => {
-            try { nexus && nexus.emit && nexus.emit('FIREBASE_DISCONNECTED', { error: e && e.message ? e.message : String(e) }); } catch (_) {}
-          });
-
-        return false;
-      }
+      ensureFirebaseCompat();
 
       if (!window.firebase.apps || window.firebase.apps.length === 0) {
         app = window.firebase.initializeApp(firebaseConfig);
@@ -186,7 +115,7 @@
       auth = window.firebase.auth();
       db = window.firebase.database();
       fs = window.firebase.firestore();
-      fn = window.firebase.functions();
+      fn = window.firebase.functions('us-central1');
 
       setupConnectivity();
 
@@ -197,28 +126,45 @@
       }
 
       store.set('firebase.initialized', true);
-      try { nexus && nexus.emit && nexus.emit('FIREBASE_CONNECTED'); } catch (_) {}
       return true;
     }
 
+
+    function formatCallableError(e) {
+      try {
+        const code = e && typeof e.code === 'string' ? e.code : '';
+        const message = e && typeof e.message === 'string' ? e.message : '';
+        const details = (e && e.details !== undefined) ? e.details : null;
+        let extra = '';
+        if (details) {
+          if (typeof details === 'string') extra = details;
+          else {
+            try { extra = JSON.stringify(details); } catch (_) { extra = String(details); }
+          }
+        }
+        const bits = [];
+        if (code) bits.push(code);
+        if (message) bits.push(message);
+        if (extra) bits.push(extra);
+        const out = bits.join(' | ').trim();
+        return out || 'Unknown Firebase callable error';
+      } catch (_) {
+        return 'Unknown Firebase callable error';
+      }
+    }
     async function authenticateWithTorn(apiKey) {
       const key = safeStr(apiKey);
       if (!key) throw new Error('Missing Torn API key');
 
-      if (!fn) {
-        const ok = initFirebase();
-        if (!ok && _firebaseLoadPromise) {
-          await _firebaseLoadPromise;
-          initFirebase();
-        }
-      }
-
-      if (!fn || !auth) {
-        throw new Error('Firebase is not ready yet. Please try again.');
-      }
+      if (!fn) initFirebase();
 
       const callable = fn.httpsCallable('authenticateWithTorn');
-      const res = await callable({ apiKey: key });
+      let res;
+      try {
+        res = await callable({ apiKey: key });
+      } catch (e) {
+        throw new Error(formatCallableError(e));
+      }
 
       const token = res && res.data && res.data.token ? String(res.data.token) : '';
       if (!token) throw new Error('Gatekeeper did not return a token');
