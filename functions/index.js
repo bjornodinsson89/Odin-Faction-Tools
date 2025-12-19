@@ -13,7 +13,10 @@ admin.initializeApp();
  * Authenticate a user with their Torn API key
  * Validates the key with Torn API, creates/updates user, and returns custom token
  */
-exports.authenticateWithTorn = onCall({region: 'us-central1'}, async (request) => {
+exports.authenticateWithTorn = onCall({
+  region: 'us-central1',
+  cors: ['https://www.torn.com', 'torn.com']
+}, async (request) => {
   const apiKey = request.data.apiKey;
 
   // Enhanced input validation
