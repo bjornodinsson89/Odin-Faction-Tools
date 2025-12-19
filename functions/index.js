@@ -16,14 +16,28 @@ admin.initializeApp();
 exports.authenticateWithTorn = onCall({region: 'us-central1'}, async (request) => {
   const apiKey = request.data.apiKey;
 
-  if (!apiKey || typeof apiKey !== 'string' || apiKey.length < 16) {
+  // Enhanced input validation
+  if (!apiKey || typeof apiKey !== 'string') {
     throw new HttpsError('invalid-argument', 'Invalid or missing Torn API key');
+  }
+
+  // Sanitize and validate API key format
+  const sanitizedKey = apiKey.trim();
+
+  // Torn API keys are 16 characters, alphanumeric
+  if (sanitizedKey.length !== 16) {
+    throw new HttpsError('invalid-argument', 'Torn API key must be exactly 16 characters');
+  }
+
+  // Check for valid characters (alphanumeric only)
+  if (!/^[a-zA-Z0-9]+$/.test(sanitizedKey)) {
+    throw new HttpsError('invalid-argument', 'Torn API key contains invalid characters');
   }
 
   try {
     // Validate API key with Torn API
     console.log('[Auth] Validating Torn API key...');
-    const response = await fetch(`https://api.torn.com/user/?selections=profile,faction&key=${apiKey}`);
+    const response = await fetch(`https://api.torn.com/user/?selections=profile,faction&key=${sanitizedKey}`);
 
     if (!response.ok) {
       throw new HttpsError('invalid-argument', 'Failed to validate Torn API key');
@@ -39,6 +53,7 @@ exports.authenticateWithTorn = onCall({region: 'us-central1'}, async (request) =
 
     const playerId = data.player_id;
     const playerName = data.name;
+    const playerLevel = data.level || 1;
     const factionId = data.faction?.faction_id || null;
     const factionName = data.faction?.faction_name || null;
 
@@ -46,13 +61,14 @@ exports.authenticateWithTorn = onCall({region: 'us-central1'}, async (request) =
       throw new HttpsError('internal', 'Failed to get player ID from Torn API');
     }
 
-    console.log(`[Auth] Validated player: ${playerName} (${playerId}) from faction: ${factionName} (${factionId})`);
+    console.log(`[Auth] Validated player: ${playerName} (${playerId}) Level ${playerLevel} from faction: ${factionName} (${factionId})`);
 
     // Create or update user in Firestore
     const userRef = admin.firestore().collection('users').doc(String(playerId));
     await userRef.set({
       playerId: playerId,
       playerName: playerName,
+      level: playerLevel,
       factionId: factionId,
       factionName: factionName,
       lastLogin: admin.firestore.FieldValue.serverTimestamp(),

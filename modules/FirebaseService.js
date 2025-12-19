@@ -58,6 +58,8 @@
         store.set('auth.uid', null);
         store.set('auth.factionId', null);
         store.set('auth.tornId', null);
+        store.set('userLevel', null);
+        ctx.userLevel = null;
         nexus.emit('AUTH_STATE_CHANGED', { user: null, factionId: null });
         return;
       }
@@ -77,6 +79,29 @@
       store.set('auth.uid', user.uid);
       store.set('auth.factionId', factionId);
       store.set('auth.tornId', tornId);
+
+      // Auth-to-Store Bridge: Fetch user document from Firestore and populate userLevel
+      if (fs && user.uid) {
+        try {
+          const userDocRef = fs.collection('users').doc(user.uid);
+          const userDoc = await userDocRef.get();
+
+          if (userDoc.exists) {
+            const userData = userDoc.data();
+            const userLevel = userData && userData.level ? userData.level : null;
+
+            if (userLevel) {
+              store.set('userLevel', userLevel);
+              ctx.userLevel = userLevel;
+              log(`[Firebase] User level loaded: ${userLevel}`);
+            }
+          } else {
+            log('[Firebase] User document not found in Firestore');
+          }
+        } catch (e) {
+          log('[Firebase] Failed to fetch user document:', e.message);
+        }
+      }
 
       nexus.emit('AUTH_STATE_CHANGED', { user: { uid: user.uid }, factionId, tornId });
     }
@@ -235,16 +260,30 @@
       } catch (error) {
         log('[Firebase] Authentication error:', error);
 
-        // Extract meaningful error message
+        // Extract meaningful error message from HttpsError
+        let errorMessage = 'Authentication failed';
+
         if (error.code === 'functions/not-found') {
-          throw new Error('Cloud function not found. The authenticateWithTorn function may not be deployed.');
+          errorMessage = 'Cloud function not found. Please ensure the authenticateWithTorn function is deployed to us-central1.';
         } else if (error.code === 'functions/internal') {
-          throw new Error('Server error: ' + (error.message || 'Unknown internal error'));
+          errorMessage = 'Server error: ' + (error.message || 'Unknown internal error');
+        } else if (error.code === 'functions/unauthenticated') {
+          errorMessage = 'Authentication required. Please check your API key.';
+        } else if (error.code === 'functions/permission-denied') {
+          errorMessage = 'Permission denied. Please verify your access rights.';
+        } else if (error.code === 'functions/invalid-argument') {
+          errorMessage = error.message || 'Invalid API key format. Please check your Torn API key.';
+        } else if (error.code === 'functions/deadline-exceeded') {
+          errorMessage = 'Request timeout. Please try again.';
+        } else if (error.code === 'functions/unavailable') {
+          errorMessage = 'Service temporarily unavailable. Please try again later.';
         } else if (error.message) {
-          throw new Error(error.message);
+          errorMessage = error.message;
         } else {
-          throw new Error('Unknown error: ' + String(error));
+          errorMessage = 'Unknown error: ' + String(error);
         }
+
+        throw new Error(errorMessage);
       }
     }
 
