@@ -15,12 +15,23 @@ admin.initializeApp();
  */
 exports.authenticateWithTorn = onCall({
   region: 'us-central1',
-  cors: ['https://www.torn.com', 'torn.com']
+  cors: ['https://www.torn.com', 'https://torn.com']
 }, async (request) => {
+  // ===== ENTRY LOGGING =====
+  console.log('[Auth] ===== authenticateWithTorn ENTRY =====');
+  console.log('[Auth] Request received:', {
+    hasData: !!request.data,
+    dataKeys: request.data ? Object.keys(request.data) : [],
+    hasApiKey: !!(request.data && request.data.apiKey),
+    apiKeyLength: (request.data && request.data.apiKey) ? request.data.apiKey.length : 0,
+    rawDataType: typeof request.rawRequest?.body
+  });
+
   const apiKey = request.data.apiKey;
 
   // Enhanced input validation
   if (!apiKey || typeof apiKey !== 'string') {
+    console.error('[Auth] Validation failed: Invalid or missing API key');
     throw new HttpsError('invalid-argument', 'Invalid or missing Torn API key');
   }
 
@@ -69,6 +80,16 @@ exports.authenticateWithTorn = onCall({
 
     console.log(`[Auth] Validated player: ${playerName} (${playerId}) Level ${playerLevel} from faction: ${factionName} (${factionId})`);
 
+    // ===== BEFORE DB WRITE =====
+    console.log('[Auth] ===== BEFORE DATABASE WRITES =====');
+    console.log('[Auth] Writing to Firestore:', {
+      collection: 'users',
+      docId: String(playerId),
+      playerName: playerName,
+      level: playerLevel,
+      factionId: factionId
+    });
+
     // Create or update user in Firestore
     const userRef = admin.firestore().collection('users').doc(String(playerId));
     await userRef.set({
@@ -81,8 +102,15 @@ exports.authenticateWithTorn = onCall({
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
     }, { merge: true });
 
+    console.log('[Auth] ✓ User document written successfully');
+
     // Update faction member list if in a faction
     if (factionId) {
+      console.log('[Auth] Writing faction member:', {
+        collection: `factions/${factionId}/members`,
+        docId: String(playerId)
+      });
+
       const factionMemberRef = admin.firestore()
         .collection('factions')
         .doc(String(factionId))
@@ -94,7 +122,12 @@ exports.authenticateWithTorn = onCall({
         playerName: playerName,
         lastSeen: admin.firestore.FieldValue.serverTimestamp()
       }, { merge: true });
+
+      console.log('[Auth] ✓ Faction member document written successfully');
     }
+
+    // ===== AFTER DB WRITE =====
+    console.log('[Auth] ===== DATABASE WRITES COMPLETED =====');
 
     // Create custom claims for the token
     const claims = {
@@ -105,7 +138,9 @@ exports.authenticateWithTorn = onCall({
     // Create custom token for Firebase Auth
     const customToken = await admin.auth().createCustomToken(String(playerId), claims);
 
-    console.log(`[Auth] Successfully authenticated player ${playerId}`);
+    console.log(`[Auth] ✓ Custom token created successfully`);
+    console.log('[Auth] ===== AUTHENTICATION SUCCESSFUL =====');
+    console.log(`[Auth] Returning success response for player ${playerId}`);
 
     return {
       success: true,

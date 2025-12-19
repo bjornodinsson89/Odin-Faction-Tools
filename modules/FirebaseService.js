@@ -202,10 +202,18 @@
 
       // Functions must be bound to the initialized Firebase App; compat `firebase.functions()` does NOT accept region.
       // For regional callable (2nd gen in us-central1), use `app.functions('us-central1')`.
+      // CRITICAL: Always use us-central1 region to match server deployment
       try {
-        fn = (app && typeof app.functions === 'function') ? app.functions('us-central1') : window.firebase.app().functions('us-central1');
-      } catch (_) {
-        try { fn = window.firebase.functions(); } catch (__) { fn = null; }
+        if (app && typeof app.functions === 'function') {
+          fn = app.functions('us-central1');
+          log('[Firebase] Functions initialized with region: us-central1');
+        } else {
+          fn = window.firebase.app().functions('us-central1');
+          log('[Firebase] Functions initialized via global app with region: us-central1');
+        }
+      } catch (e) {
+        log('[Firebase] ERROR: Failed to initialize Functions with us-central1:', e.message);
+        fn = null;
       }
 
       setupConnectivity();
@@ -238,21 +246,33 @@
         throw new Error('Firebase Functions failed to initialize. Check console for details.');
       }
 
-      log('[Firebase] Calling authenticateWithTorn cloud function...');
+      log('[Firebase] ===== CALLING authenticateWithTorn =====');
+      log('[Firebase] API Key length:', key.length);
+      log('[Firebase] Functions instance ready:', !!fn);
 
       try {
         const callable = fn.httpsCallable('authenticateWithTorn');
+        log('[Firebase] Created httpsCallable for authenticateWithTorn');
+        log('[Firebase] Invoking callable with payload...');
+
         const res = await callable({ apiKey: key });
 
-        log('[Firebase] Cloud function response:', res);
+        log('[Firebase] ===== CLOUD FUNCTION RESPONSE =====');
+        log('[Firebase] Response received:', {
+          hasData: !!res.data,
+          dataKeys: res.data ? Object.keys(res.data) : [],
+          success: res.data?.success,
+          hasToken: !!(res.data?.token)
+        });
 
         const token = res && res.data && res.data.token ? String(res.data.token) : '';
         if (!token) {
           const errorMsg = res && res.data && res.data.error ? res.data.error : 'Unknown error';
+          log('[Firebase] ERROR: No token received from cloud function');
           throw new Error('Authentication failed: ' + errorMsg);
         }
 
-        log('[Firebase] Signing in with custom token...');
+        log('[Firebase] ✓ Token received, signing in with custom token...');
 
         // Wait for auth state to be fully established
         const authPromise = new Promise((resolve, reject) => {
@@ -264,18 +284,27 @@
             if (user) {
               clearTimeout(timeout);
               unsubscribe();
+              log('[Firebase] ✓ Auth state changed, user authenticated:', user.uid);
               resolve(user);
             }
           });
         });
 
         await auth.signInWithCustomToken(token);
+        log('[Firebase] ✓ signInWithCustomToken completed, waiting for auth state...');
+
         await authPromise; // Wait for the auth state to propagate
 
-        log('[Firebase] Successfully authenticated!');
+        log('[Firebase] ===== AUTHENTICATION SUCCESSFUL =====');
         return true;
       } catch (error) {
-        log('[Firebase] Authentication error:', error);
+        log('[Firebase] ===== AUTHENTICATION ERROR =====');
+        log('[Firebase] Error details:', {
+          code: error.code,
+          message: error.message,
+          name: error.name,
+          stack: error.stack?.substring(0, 200)
+        });
 
         // Extract meaningful error message from HttpsError
         let errorMessage = 'Authentication failed';
@@ -300,6 +329,7 @@
           errorMessage = 'Unknown error: ' + String(error);
         }
 
+        log('[Firebase] Throwing error:', errorMessage);
         throw new Error(errorMessage);
       }
     }
