@@ -47,8 +47,10 @@
     let fn = null;
 
     let connected = false;
+    let firestoreReady = false;
     let unsubAuth = null;
     let unsubConn = null;
+    let firestoreTestInterval = null;
 
     async function refreshClaims(user) {
       if (!user) {
@@ -101,6 +103,50 @@
         db.ref('.info/connected').off('value', unsubConn);
       } catch (_) {}
       unsubConn = null;
+
+      if (firestoreTestInterval) {
+        clearInterval(firestoreTestInterval);
+        firestoreTestInterval = null;
+      }
+    }
+
+    async function testFirestoreConnection() {
+      if (!fs) return false;
+
+      try {
+        // Try to read from a test collection
+        const testRef = fs.collection('_connection_test').doc('ping');
+        await testRef.get();
+
+        if (!firestoreReady) {
+          firestoreReady = true;
+          store.set('firebase.firestoreReady', true);
+          nexus.emit('FIRESTORE_CONNECTED', { ready: true });
+          log('[Firebase] Firestore connection established');
+        }
+        return true;
+      } catch (e) {
+        if (firestoreReady) {
+          firestoreReady = false;
+          store.set('firebase.firestoreReady', false);
+          nexus.emit('FIRESTORE_DISCONNECTED', { error: e.message });
+          log('[Firebase] Firestore connection lost:', e.message);
+        }
+        return false;
+      }
+    }
+
+    function setupFirestoreMonitoring() {
+      if (!fs) return;
+
+      // Test connection immediately
+      testFirestoreConnection();
+
+      // Test periodically (every 30 seconds)
+      if (firestoreTestInterval) clearInterval(firestoreTestInterval);
+      firestoreTestInterval = setInterval(() => {
+        testFirestoreConnection();
+      }, 30000);
     }
 
     function initFirebase() {
@@ -114,7 +160,21 @@
 
       auth = window.firebase.auth();
       db = window.firebase.database();
-      fs = window.firebase.firestore();
+
+      // Initialize Firestore with proper error handling
+      try {
+        if (typeof window.firebase.firestore === 'function') {
+          fs = window.firebase.firestore();
+          log('[Firebase] Firestore initialized successfully');
+        } else {
+          log('[Firebase] WARNING: Firestore SDK not loaded. Please add firestore-compat.js to your userscript @require directives.');
+          fs = null;
+        }
+      } catch (e) {
+        log('[Firebase] Firestore initialization failed:', e.message);
+        fs = null;
+      }
+
       // Functions must be bound to the initialized Firebase App; compat `firebase.functions()` does NOT accept region.
       // For regional callable (2nd gen in us-central1), use `app.functions('us-central1')`.
       try {
@@ -124,6 +184,11 @@
       }
 
       setupConnectivity();
+
+      // Setup Firestore monitoring if available
+      if (fs) {
+        setupFirestoreMonitoring();
+      }
 
       if (!unsubAuth) {
         unsubAuth = auth.onAuthStateChanged((user) => {
@@ -170,6 +235,115 @@
       return db.ref(path);
     }
 
+    function isFirestoreReady() {
+      return !!firestoreReady && !!fs;
+    }
+
+    function collection(path) {
+      if (!fs) {
+        initFirebase();
+        if (!fs) throw new Error('Firestore not available. Please load firestore-compat.js');
+      }
+      return fs.collection(path);
+    }
+
+    function doc(collectionPath, docId) {
+      if (!fs) {
+        initFirebase();
+        if (!fs) throw new Error('Firestore not available. Please load firestore-compat.js');
+      }
+      return fs.collection(collectionPath).doc(docId);
+    }
+
+    async function getDoc(collectionPath, docId) {
+      if (!fs) {
+        initFirebase();
+        if (!fs) throw new Error('Firestore not available. Please load firestore-compat.js');
+      }
+      const docRef = fs.collection(collectionPath).doc(docId);
+      const snapshot = await docRef.get();
+      return snapshot.exists ? { id: snapshot.id, ...snapshot.data() } : null;
+    }
+
+    async function setDoc(collectionPath, docId, data, options = {}) {
+      if (!fs) {
+        initFirebase();
+        if (!fs) throw new Error('Firestore not available. Please load firestore-compat.js');
+      }
+      const docRef = fs.collection(collectionPath).doc(docId);
+      if (options.merge) {
+        await docRef.set(data, { merge: true });
+      } else {
+        await docRef.set(data);
+      }
+      return true;
+    }
+
+    async function updateDoc(collectionPath, docId, data) {
+      if (!fs) {
+        initFirebase();
+        if (!fs) throw new Error('Firestore not available. Please load firestore-compat.js');
+      }
+      const docRef = fs.collection(collectionPath).doc(docId);
+      await docRef.update(data);
+      return true;
+    }
+
+    async function deleteDoc(collectionPath, docId) {
+      if (!fs) {
+        initFirebase();
+        if (!fs) throw new Error('Firestore not available. Please load firestore-compat.js');
+      }
+      const docRef = fs.collection(collectionPath).doc(docId);
+      await docRef.delete();
+      return true;
+    }
+
+    async function queryCollection(collectionPath, queryFn) {
+      if (!fs) {
+        initFirebase();
+        if (!fs) throw new Error('Firestore not available. Please load firestore-compat.js');
+      }
+      let query = fs.collection(collectionPath);
+      if (typeof queryFn === 'function') {
+        query = queryFn(query);
+      }
+      const snapshot = await query.get();
+      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    }
+
+    function onSnapshot(collectionOrDocPath, docId, callback, errorCallback) {
+      if (!fs) {
+        initFirebase();
+        if (!fs) {
+          if (errorCallback) errorCallback(new Error('Firestore not available'));
+          return () => {};
+        }
+      }
+
+      let ref;
+      if (docId) {
+        ref = fs.collection(collectionOrDocPath).doc(docId);
+      } else {
+        ref = fs.collection(collectionOrDocPath);
+      }
+
+      return ref.onSnapshot(
+        (snapshot) => {
+          if (snapshot.docs) {
+            // Collection snapshot
+            const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            callback(docs);
+          } else {
+            // Document snapshot
+            const data = snapshot.exists ? { id: snapshot.id, ...snapshot.data() } : null;
+            callback(data);
+          }
+        },
+        errorCallback || ((err) => log('[Firebase] Snapshot error:', err))
+      );
+    }
+
     const firebaseFacade = {
       version: '5.0.0',
       firebaseConfig,
@@ -177,11 +351,21 @@
       authenticateWithTorn,
       signOut,
       isConnected,
+      isFirestoreReady,
       getCurrentUser,
       auth: function () { if (!auth) initFirebase(); return auth; },
       rtdb: function () { if (!db) initFirebase(); return db; },
       firestore: function () { if (!fs) initFirebase(); return fs; },
-      ref
+      ref,
+      // Firestore convenience methods
+      collection,
+      doc,
+      getDoc,
+      setDoc,
+      updateDoc,
+      deleteDoc,
+      queryCollection,
+      onSnapshot
     };
 
     function destroy() {
