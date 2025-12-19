@@ -115,7 +115,13 @@
       auth = window.firebase.auth();
       db = window.firebase.database();
       fs = window.firebase.firestore();
-      fn = window.firebase.functions('us-central1');
+      // Functions must be bound to the initialized Firebase App; compat `firebase.functions()` does NOT accept region.
+      // For regional callable (2nd gen in us-central1), use `app.functions('us-central1')`.
+      try {
+        fn = (app && typeof app.functions === 'function') ? app.functions('us-central1') : window.firebase.app().functions('us-central1');
+      } catch (_) {
+        try { fn = window.firebase.functions(); } catch (__) { fn = null; }
+      }
 
       setupConnectivity();
 
@@ -129,29 +135,6 @@
       return true;
     }
 
-
-    function formatCallableError(e) {
-      try {
-        const code = e && typeof e.code === 'string' ? e.code : '';
-        const message = e && typeof e.message === 'string' ? e.message : '';
-        const details = (e && e.details !== undefined) ? e.details : null;
-        let extra = '';
-        if (details) {
-          if (typeof details === 'string') extra = details;
-          else {
-            try { extra = JSON.stringify(details); } catch (_) { extra = String(details); }
-          }
-        }
-        const bits = [];
-        if (code) bits.push(code);
-        if (message) bits.push(message);
-        if (extra) bits.push(extra);
-        const out = bits.join(' | ').trim();
-        return out || 'Unknown Firebase callable error';
-      } catch (_) {
-        return 'Unknown Firebase callable error';
-      }
-    }
     async function authenticateWithTorn(apiKey) {
       const key = safeStr(apiKey);
       if (!key) throw new Error('Missing Torn API key');
@@ -159,12 +142,7 @@
       if (!fn) initFirebase();
 
       const callable = fn.httpsCallable('authenticateWithTorn');
-      let res;
-      try {
-        res = await callable({ apiKey: key });
-      } catch (e) {
-        throw new Error(formatCallableError(e));
-      }
+      const res = await callable({ apiKey: key });
 
       const token = res && res.data && res.data.token ? String(res.data.token) : '';
       if (!token) throw new Error('Gatekeeper did not return a token');
