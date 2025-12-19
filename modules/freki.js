@@ -294,27 +294,38 @@
     }
 
     function extractFeatures(attackerData, defenderData, context = {}) {
-      const attackerLevel = attackerData.level || 1;
-      const defenderLevel = defenderData.level || 1;
+      // Validate and sanitize inputs to prevent NaN
+      const attackerLevel = Number(attackerData?.level) || 1;
+      const defenderLevel = Number(defenderData?.level) || 1;
       const now = new Date();
 
-      return [
-        normalizeLevel(attackerLevel),                                    // 0
-        normalizeLevel(defenderLevel),                                    // 1
-        (attackerLevel - defenderLevel + 100) / 200,                     // 2
-        getActivityScore(defenderData),                                   // 3
-        defenderData.status === 'Hospital' ? 1 : 0,                      // 4
-        Math.min(1, (context.chain || 0) / 1000),                        // 5
-        context.inWar ? 1 : 0,                                            // 6
-        defenderData.tornStatsScore ? normalizeStats(defenderData.tornStatsScore) : 0, // 7
-        defenderData.ffScouterScore ? normalizeStats(defenderData.ffScouterScore) : 0, // 8
-        context.historicalWinRate || 0.5,                                 // 9
-        now.getHours() / 24,                                              // 10
-        now.getDay() / 7,                                                 // 11
-        defenderData.isOnline ? 1 : 0,                                   // 12
-        Math.min(1, (context.estimatedFF || 3) / 8),                     // 13
-        Math.min(1, (context.estimatedRespect || 2) / 10)                // 14
+      // Helper to ensure valid number in range [0, 1]
+      function safeNormalize(value, defaultVal = 0) {
+        const num = Number(value);
+        if (!isFinite(num) || isNaN(num)) return defaultVal;
+        return Math.max(0, Math.min(1, num));
+      }
+
+      const features = [
+        safeNormalize(normalizeLevel(attackerLevel)),                     // 0
+        safeNormalize(normalizeLevel(defenderLevel)),                     // 1
+        safeNormalize((attackerLevel - defenderLevel + 100) / 200, 0.5),  // 2
+        safeNormalize(getActivityScore(defenderData || {}), 0.5),         // 3
+        defenderData?.status === 'Hospital' ? 1 : 0,                      // 4
+        safeNormalize((context?.chain || 0) / 1000),                      // 5
+        context?.inWar ? 1 : 0,                                           // 6
+        defenderData?.tornStatsScore ? safeNormalize(normalizeStats(defenderData.tornStatsScore)) : 0, // 7
+        defenderData?.ffScouterScore ? safeNormalize(normalizeStats(defenderData.ffScouterScore)) : 0, // 8
+        safeNormalize(context?.historicalWinRate, 0.5),                   // 9
+        safeNormalize(now.getHours() / 24),                               // 10
+        safeNormalize(now.getDay() / 7),                                  // 11
+        defenderData?.isOnline ? 1 : 0,                                   // 12
+        safeNormalize((context?.estimatedFF || 3) / 8),                   // 13
+        safeNormalize((context?.estimatedRespect || 2) / 10)              // 14
       ];
+
+      // Final validation: ensure all features are valid numbers
+      return features.map(f => isFinite(f) && !isNaN(f) ? f : 0);
     }
 
     // ============================================
@@ -577,29 +588,65 @@
     // COMMUNITY MODEL SYNC
     // ============================================
     async function syncCommunityModel() {
-      if (!ctx.firebase) return false;
+      if (!ctx.firebase || !ctx.firebase.getDoc) return false;
 
       try {
-        const communityModel = await ctx.firebase.getNeuralNetworkModel();
-        if (!communityModel) return false;
+        // Fetch community model from Firestore
+        const modelDoc = await ctx.firebase.getDoc('freki/models', 'community-v1');
+        if (!modelDoc) {
+          log('[Freki] No community model found');
+          return false;
+        }
 
-        // Merge with local model
-        if (neuralNet && trainingData.length >= 20 && communityModel.weightsIH) {
-          // Weighted merge: 70% local, 30% community
-          if (neuralNet.weightsIH) {
-            for (let i = 0; i < neuralNet.weightsIH.length; i++) {
-              for (let j = 0; j < neuralNet.weightsIH[i].length; j++) {
-                if (communityModel.weightsIH[i]?.[j] !== undefined) {
-                  neuralNet.weightsIH[i][j] = 
-                    0.7 * neuralNet.weightsIH[i][j] + 
-                    0.3 * communityModel.weightsIH[i][j];
+        const communityModel = modelDoc;
+
+        // Handle advanced NeuralNetwork format
+        if (communityModel.type === 'NeuralNetwork' && communityModel.weights) {
+          if (window.NeuralNetwork && neuralNet instanceof window.NeuralNetwork) {
+            // Both are advanced networks - merge weights
+            if (trainingData.length >= 20) {
+              // Weighted merge: 70% local, 30% community
+              for (let l = 0; l < neuralNet.weights.length && l < communityModel.weights.length; l++) {
+                for (let i = 0; i < neuralNet.weights[l].length && i < communityModel.weights[l].length; i++) {
+                  for (let j = 0; j < neuralNet.weights[l][i].length && j < communityModel.weights[l][i].length; j++) {
+                    neuralNet.weights[l][i][j] =
+                      0.7 * neuralNet.weights[l][i][j] +
+                      0.3 * communityModel.weights[l][i][j];
+                  }
                 }
               }
+              log('[Freki] Merged with community model (advanced format)');
+            } else {
+              // Use community model directly
+              neuralNet = window.NeuralNetwork.deserialize(communityModel);
+              log('[Freki] Loaded community model (advanced format)');
             }
           }
-        } else if (communityModel.weightsIH) {
-          // Use community model directly for new users
-          loadSimpleModel(communityModel);
+        }
+        // Handle simple network format (legacy)
+        else if (communityModel.weightsIH && communityModel.weightsHO) {
+          if (neuralNet && neuralNet.weightsIH && trainingData.length >= 20) {
+            // Weighted merge: 70% local, 30% community
+            for (let i = 0; i < neuralNet.weightsIH.length && i < communityModel.weightsIH.length; i++) {
+              for (let j = 0; j < neuralNet.weightsIH[i].length && j < communityModel.weightsIH[i].length; j++) {
+                neuralNet.weightsIH[i][j] =
+                  0.7 * neuralNet.weightsIH[i][j] +
+                  0.3 * communityModel.weightsIH[i][j];
+              }
+            }
+            for (let i = 0; i < neuralNet.weightsHO.length && i < communityModel.weightsHO.length; i++) {
+              for (let j = 0; j < neuralNet.weightsHO[i].length && j < communityModel.weightsHO[i].length; j++) {
+                neuralNet.weightsHO[i][j] =
+                  0.7 * neuralNet.weightsHO[i][j] +
+                  0.3 * communityModel.weightsHO[i][j];
+              }
+            }
+            log('[Freki] Merged with community model (simple format)');
+          } else {
+            // Use community model directly for new users
+            loadSimpleModel(communityModel);
+            log('[Freki] Loaded community model (simple format)');
+          }
         }
 
         modelVersion = communityModel.version || 'community-v1';
