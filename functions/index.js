@@ -50,7 +50,10 @@ exports.authenticateWithTorn = onCall({
 
     // Check for Torn API errors
     if (data.error) {
-      console.error('[Auth] Torn API error:', data.error);
+      console.error('[Auth] Torn API error:', {
+        code: data.error.code,
+        message: data.error.error
+      });
       throw new HttpsError('invalid-argument', `Torn API error: ${data.error.error}`);
     }
 
@@ -114,7 +117,12 @@ exports.authenticateWithTorn = onCall({
     };
 
   } catch (error) {
-    console.error('[Auth] Authentication error:', error);
+    // Log only safe properties to avoid circular reference errors
+    console.error('[Auth] Authentication error:', {
+      message: error?.message,
+      code: error?.code,
+      stack: error?.stack
+    });
 
     if (error instanceof HttpsError) {
       throw error;
