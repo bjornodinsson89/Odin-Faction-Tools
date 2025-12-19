@@ -253,7 +253,24 @@
         }
 
         log('[Firebase] Signing in with custom token...');
+
+        // Wait for auth state to be fully established
+        const authPromise = new Promise((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            reject(new Error('Authentication timeout - user state not established'));
+          }, 10000); // 10 second timeout
+
+          const unsubscribe = auth.onAuthStateChanged((user) => {
+            if (user) {
+              clearTimeout(timeout);
+              unsubscribe();
+              resolve(user);
+            }
+          });
+        });
+
         await auth.signInWithCustomToken(token);
+        await authPromise; // Wait for the auth state to propagate
 
         log('[Firebase] Successfully authenticated!');
         return true;
