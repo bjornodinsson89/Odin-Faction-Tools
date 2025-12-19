@@ -204,17 +204,48 @@
       const key = safeStr(apiKey);
       if (!key) throw new Error('Missing Torn API key');
 
-      if (!fn) initFirebase();
+      if (!fn) {
+        log('[Firebase] Functions not initialized, initializing Firebase...');
+        initFirebase();
+      }
 
-      const callable = fn.httpsCallable('authenticateWithTorn');
-      const res = await callable({ apiKey: key });
+      if (!fn) {
+        throw new Error('Firebase Functions failed to initialize. Check console for details.');
+      }
 
-      const token = res && res.data && res.data.token ? String(res.data.token) : '';
-      if (!token) throw new Error('Gatekeeper did not return a token');
+      log('[Firebase] Calling authenticateWithTorn cloud function...');
 
-      await auth.signInWithCustomToken(token);
+      try {
+        const callable = fn.httpsCallable('authenticateWithTorn');
+        const res = await callable({ apiKey: key });
 
-      return true;
+        log('[Firebase] Cloud function response:', res);
+
+        const token = res && res.data && res.data.token ? String(res.data.token) : '';
+        if (!token) {
+          const errorMsg = res && res.data && res.data.error ? res.data.error : 'Unknown error';
+          throw new Error('Authentication failed: ' + errorMsg);
+        }
+
+        log('[Firebase] Signing in with custom token...');
+        await auth.signInWithCustomToken(token);
+
+        log('[Firebase] Successfully authenticated!');
+        return true;
+      } catch (error) {
+        log('[Firebase] Authentication error:', error);
+
+        // Extract meaningful error message
+        if (error.code === 'functions/not-found') {
+          throw new Error('Cloud function not found. The authenticateWithTorn function may not be deployed.');
+        } else if (error.code === 'functions/internal') {
+          throw new Error('Server error: ' + (error.message || 'Unknown internal error'));
+        } else if (error.message) {
+          throw new Error(error.message);
+        } else {
+          throw new Error('Unknown error: ' + String(error));
+        }
+      }
     }
 
     async function signOut() {
