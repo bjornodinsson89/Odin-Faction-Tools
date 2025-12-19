@@ -177,20 +177,32 @@
     function initFirebase() {
       ensureFirebaseCompat();
 
+      log('[Firebase] ===== INITIALIZING FIREBASE =====');
+      log('[Firebase] SDK Status:', {
+        hasFirebase: typeof window.firebase !== 'undefined',
+        hasAuth: typeof window.firebase?.auth === 'function',
+        hasDatabase: typeof window.firebase?.database === 'function',
+        hasFirestore: typeof window.firebase?.firestore === 'function',
+        hasFunctions: typeof window.firebase?.app === 'function'
+      });
+
       if (!window.firebase.apps || window.firebase.apps.length === 0) {
         app = window.firebase.initializeApp(firebaseConfig);
+        log('[Firebase] ✓ Firebase app initialized');
       } else {
         app = window.firebase.app();
+        log('[Firebase] ✓ Using existing Firebase app');
       }
 
       auth = window.firebase.auth();
       db = window.firebase.database();
+      log('[Firebase] ✓ Auth and Database initialized');
 
       // Initialize Firestore with proper error handling
       try {
         if (typeof window.firebase.firestore === 'function') {
           fs = window.firebase.firestore();
-          log('[Firebase] Firestore initialized successfully');
+          log('[Firebase] ✓ Firestore initialized successfully');
         } else {
           log('[Firebase] WARNING: Firestore SDK not loaded. Please add firestore-compat.js to your userscript @require directives.');
           fs = null;
@@ -200,19 +212,38 @@
         fs = null;
       }
 
-      // Functions must be bound to the initialized Firebase App; compat `firebase.functions()` does NOT accept region.
-      // For regional callable (2nd gen in us-central1), use `app.functions('us-central1')`.
-      // CRITICAL: Always use us-central1 region to match server deployment
+      // CRITICAL: Initialize Functions with us-central1 region
+      // Firebase compat SDK requires: firebase.app().functions('us-central1')
+      // This MUST match the server deployment region
       try {
-        if (app && typeof app.functions === 'function') {
-          fn = app.functions('us-central1');
-          log('[Firebase] Functions initialized with region: us-central1');
-        } else {
-          fn = window.firebase.app().functions('us-central1');
-          log('[Firebase] Functions initialized via global app with region: us-central1');
+        // Validate Functions SDK is available
+        if (!window.firebase.app) {
+          throw new Error('firebase.app() is not available - Functions SDK not loaded');
         }
+        if (typeof window.firebase.app().functions !== 'function') {
+          throw new Error('firebase.app().functions() is not available - Functions SDK not loaded');
+        }
+
+        // Initialize with explicit region
+        fn = window.firebase.app().functions('us-central1');
+
+        if (!fn) {
+          throw new Error('Functions instance is null after initialization');
+        }
+        if (typeof fn.httpsCallable !== 'function') {
+          throw new Error('Functions instance missing httpsCallable method');
+        }
+
+        log('[Firebase] ✓ Functions initialized successfully');
+        log('[Firebase] ✓ Region: us-central1 (CRITICAL: must match server deployment)');
+        log('[Firebase] ✓ httpsCallable method available:', typeof fn.httpsCallable);
       } catch (e) {
-        log('[Firebase] ERROR: Failed to initialize Functions with us-central1:', e.message);
+        log('[Firebase] ========================================');
+        log('[Firebase] CRITICAL ERROR: Functions initialization failed!');
+        log('[Firebase] Error:', e.message);
+        log('[Firebase] This will prevent authentication from working.');
+        log('[Firebase] Please ensure functions-compat.js is loaded in @require');
+        log('[Firebase] ========================================');
         fn = null;
       }
 
@@ -238,22 +269,32 @@
       if (!key) throw new Error('Missing Torn API key');
 
       if (!fn) {
-        log('[Firebase] Functions not initialized, initializing Firebase...');
+        log('[Firebase] Functions not initialized, attempting initialization...');
         initFirebase();
       }
 
       if (!fn) {
-        throw new Error('Firebase Functions failed to initialize. Check console for details.');
+        throw new Error('Firebase Functions failed to initialize. Functions SDK may not be loaded. Check console for details.');
       }
 
       log('[Firebase] ===== CALLING authenticateWithTorn =====');
       log('[Firebase] API Key length:', key.length);
-      log('[Firebase] Functions instance ready:', !!fn);
+      log('[Firebase] Functions instance:', {
+        exists: !!fn,
+        hasHttpsCallable: !!(fn && typeof fn.httpsCallable === 'function'),
+        functionsType: typeof fn
+      });
 
       try {
+        // Validate callable is available before calling
+        if (typeof fn.httpsCallable !== 'function') {
+          throw new Error('fn.httpsCallable is not a function. Functions SDK may be corrupted.');
+        }
+
         const callable = fn.httpsCallable('authenticateWithTorn');
-        log('[Firebase] Created httpsCallable for authenticateWithTorn');
-        log('[Firebase] Invoking callable with payload...');
+        log('[Firebase] ✓ Created httpsCallable for authenticateWithTorn');
+        log('[Firebase] ✓ Callable type:', typeof callable);
+        log('[Firebase] Invoking callable with payload: { apiKey: <' + key.length + ' chars> }');
 
         const res = await callable({ apiKey: key });
 
@@ -299,38 +340,57 @@
         return true;
       } catch (error) {
         log('[Firebase] ===== AUTHENTICATION ERROR =====');
+        log('[Firebase] Error type:', error.constructor.name);
+        log('[Firebase] Error code:', error.code || 'none');
+        log('[Firebase] Error message:', error.message || 'none');
         log('[Firebase] Error details:', {
           code: error.code,
           message: error.message,
           name: error.name,
-          stack: error.stack?.substring(0, 200)
+          details: error.details || 'none',
+          stack: error.stack?.substring(0, 300)
         });
 
         // Extract meaningful error message from HttpsError
         let errorMessage = 'Authentication failed';
+        let troubleshooting = '';
 
         if (error.code === 'functions/not-found') {
-          errorMessage = 'Cloud function not found. Please ensure the authenticateWithTorn function is deployed to us-central1.';
+          errorMessage = 'Cloud function not found';
+          troubleshooting = 'Ensure authenticateWithTorn is deployed to us-central1 region.';
         } else if (error.code === 'functions/internal') {
-          errorMessage = 'Server error: ' + (error.message || 'Unknown internal error');
+          errorMessage = 'Server error: ' + (error.message || 'internal');
+          troubleshooting = 'Check Cloud Run logs for server-side errors. The function may have thrown an exception.';
+        } else if (error.code === 'functions/invalid-request') {
+          errorMessage = 'Invalid request format';
+          troubleshooting = 'The callable function received a non-callable request. Ensure you are using httpsCallable() not fetch/xhr.';
         } else if (error.code === 'functions/unauthenticated') {
-          errorMessage = 'Authentication required. Please check your API key.';
+          errorMessage = 'Authentication required';
+          troubleshooting = 'Check your API key.';
         } else if (error.code === 'functions/permission-denied') {
-          errorMessage = 'Permission denied. Please verify your access rights.';
+          errorMessage = 'Permission denied';
+          troubleshooting = 'Verify your access rights.';
         } else if (error.code === 'functions/invalid-argument') {
-          errorMessage = error.message || 'Invalid API key format. Please check your Torn API key.';
+          errorMessage = error.message || 'Invalid API key format';
+          troubleshooting = 'Check your Torn API key is exactly 16 alphanumeric characters.';
         } else if (error.code === 'functions/deadline-exceeded') {
-          errorMessage = 'Request timeout. Please try again.';
+          errorMessage = 'Request timeout';
+          troubleshooting = 'Try again. The server may be slow or unreachable.';
         } else if (error.code === 'functions/unavailable') {
-          errorMessage = 'Service temporarily unavailable. Please try again later.';
+          errorMessage = 'Service temporarily unavailable';
+          troubleshooting = 'Try again later. The function may be deploying.';
         } else if (error.message) {
           errorMessage = error.message;
         } else {
           errorMessage = 'Unknown error: ' + String(error);
         }
 
-        log('[Firebase] Throwing error:', errorMessage);
-        throw new Error(errorMessage);
+        log('[Firebase] Human-readable error:', errorMessage);
+        if (troubleshooting) {
+          log('[Firebase] Troubleshooting:', troubleshooting);
+        }
+
+        throw new Error(errorMessage + (troubleshooting ? ' (' + troubleshooting + ')' : ''));
       }
     }
 

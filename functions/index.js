@@ -3,7 +3,7 @@
  * Gatekeeper authentication for Torn API keys
  */
 
-const {onCall, HttpsError} = require('firebase-functions/v2/https');
+const {onCall, onRequest, HttpsError} = require('firebase-functions/v2/https');
 const admin = require('firebase-admin');
 const fetch = require('node-fetch');
 
@@ -164,5 +164,163 @@ exports.authenticateWithTorn = onCall({
     }
 
     throw new HttpsError('internal', `Authentication failed: ${error.message}`);
+  }
+});
+
+/**
+ * DIAGNOSTIC HTTP ENDPOINT (for manual testing with curl/Postman)
+ *
+ * This is NOT used by the userscript client.
+ * The userscript MUST use the callable function above.
+ *
+ * Usage with curl:
+ * curl -X POST https://us-central1-torn-war-room.cloudfunctions.net/authenticateWithTornHttp \
+ *   -H "Content-Type: application/json" \
+ *   -d '{"apiKey":"YOUR_16_CHAR_KEY"}'
+ */
+exports.authenticateWithTornHttp = onRequest({
+  region: 'us-central1',
+  cors: ['https://www.torn.com', 'https://torn.com']
+}, async (req, res) => {
+  console.log('[Auth-HTTP] ===== HTTP DIAGNOSTIC ENDPOINT CALLED =====');
+  console.log('[Auth-HTTP] Method:', req.method);
+  console.log('[Auth-HTTP] Headers:', JSON.stringify(req.headers));
+  console.log('[Auth-HTTP] Body:', JSON.stringify(req.body));
+
+  // Only accept POST
+  if (req.method !== 'POST') {
+    console.error('[Auth-HTTP] Invalid method:', req.method);
+    res.status(405).json({
+      success: false,
+      error: 'Method not allowed. Use POST.',
+      note: 'This is a diagnostic endpoint. Userscripts should use the callable function, not this HTTP endpoint.'
+    });
+    return;
+  }
+
+  // Parse API key from request body
+  const apiKey = req.body?.apiKey;
+
+  if (!apiKey || typeof apiKey !== 'string') {
+    console.error('[Auth-HTTP] Missing or invalid apiKey in request body');
+    res.status(400).json({
+      success: false,
+      error: 'Missing or invalid apiKey in request body',
+      expectedFormat: { apiKey: 'YOUR_16_CHAR_KEY' }
+    });
+    return;
+  }
+
+  try {
+    // Validate API key format
+    const sanitizedKey = apiKey.trim();
+
+    if (sanitizedKey.length !== 16) {
+      throw new Error('Torn API key must be exactly 16 characters');
+    }
+
+    if (!/^[a-zA-Z0-9]+$/.test(sanitizedKey)) {
+      throw new Error('Torn API key contains invalid characters');
+    }
+
+    // Validate with Torn API
+    console.log('[Auth-HTTP] Validating Torn API key...');
+    const response = await fetch(`https://api.torn.com/user/?selections=profile,faction&key=${sanitizedKey}`);
+
+    if (!response.ok) {
+      throw new Error('Failed to validate Torn API key');
+    }
+
+    const data = await response.json();
+
+    if (data.error) {
+      console.error('[Auth-HTTP] Torn API error:', data.error);
+      res.status(400).json({
+        success: false,
+        error: `Torn API error: ${data.error.error}`,
+        tornErrorCode: data.error.code
+      });
+      return;
+    }
+
+    const playerId = data.player_id;
+    const playerName = data.name;
+    const playerLevel = data.level || 1;
+    const factionId = data.faction?.faction_id || null;
+    const factionName = data.faction?.faction_name || null;
+
+    if (!playerId) {
+      throw new Error('Failed to get player ID from Torn API');
+    }
+
+    console.log(`[Auth-HTTP] Validated: ${playerName} (${playerId}) Level ${playerLevel} from faction: ${factionName} (${factionId})`);
+
+    // Create or update user in Firestore
+    const userRef = admin.firestore().collection('users').doc(String(playerId));
+    await userRef.set({
+      playerId: playerId,
+      playerName: playerName,
+      level: playerLevel,
+      factionId: factionId,
+      factionName: factionName,
+      lastLogin: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+
+    console.log('[Auth-HTTP] ✓ User document written');
+
+    // Update faction member list if in a faction
+    if (factionId) {
+      const factionMemberRef = admin.firestore()
+        .collection('factions')
+        .doc(String(factionId))
+        .collection('members')
+        .doc(String(playerId));
+
+      await factionMemberRef.set({
+        playerId: playerId,
+        playerName: playerName,
+        lastSeen: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+
+      console.log('[Auth-HTTP] ✓ Faction member document written');
+    }
+
+    // Create custom claims for the token
+    const claims = {
+      tornId: String(playerId),
+      factionId: factionId ? String(factionId) : null
+    };
+
+    // Create custom token
+    const customToken = await admin.auth().createCustomToken(String(playerId), claims);
+
+    console.log('[Auth-HTTP] ✓ Custom token created');
+    console.log('[Auth-HTTP] ===== AUTHENTICATION SUCCESSFUL =====');
+
+    // Return success response
+    res.status(200).json({
+      success: true,
+      token: customToken,
+      uid: String(playerId),
+      playerId: playerId,
+      playerName: playerName,
+      factionId: factionId,
+      factionName: factionName,
+      note: 'Authentication successful. This diagnostic endpoint returns the same data as the callable function.'
+    });
+
+  } catch (error) {
+    console.error('[Auth-HTTP] Error:', {
+      message: error?.message,
+      code: error?.code,
+      stack: error?.stack
+    });
+
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error',
+      note: 'This is a diagnostic endpoint. Check server logs for details.'
+    });
   }
 });
