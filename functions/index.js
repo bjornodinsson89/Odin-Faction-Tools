@@ -68,12 +68,25 @@ exports.authenticateWithTorn = onCall({
   }
 
   try {
-    // Validate API key with Torn API
+    // Validate API key with Torn API v2
     console.log('[Auth] Validating Torn API key...');
-    const response = await fetch(`https://api.torn.com/user/?selections=profile,faction&key=${sanitizedKey}`);
+    const tornEndpoint = `https://api.torn.com/v2/user/?selections=profile,faction&key=${sanitizedKey}`;
+    console.log('[Auth] Calling Torn API v2 endpoint:', tornEndpoint.replace(sanitizedKey, '[REDACTED]'));
+
+    const response = await fetch(tornEndpoint);
+
+    console.log('[Auth] Torn API response status:', {
+      status: response.status,
+      statusText: response.statusText,
+      ok: response.ok
+    });
 
     if (!response.ok) {
-      throw new HttpsError('invalid-argument', 'Failed to validate Torn API key');
+      console.error('[Auth] Torn API HTTP error:', {
+        status: response.status,
+        statusText: response.statusText
+      });
+      throw new HttpsError('invalid-argument', `Failed to validate Torn API key (HTTP ${response.status})`);
     }
 
     const data = await response.json();
@@ -87,11 +100,17 @@ exports.authenticateWithTorn = onCall({
       throw new HttpsError('invalid-argument', `Torn API error: ${data.error.error}`);
     }
 
-    const playerId = data.player_id;
-    const playerName = data.name;
-    const playerLevel = data.level || 1;
-    const factionId = data.faction?.faction_id || null;
-    const factionName = data.faction?.faction_name || null;
+    // Parse v2 response structure with backward compatibility
+    // v2 structure: data.profile and data.faction
+    // v1 structure: direct fields (backward compatibility)
+    const profile = data.profile || data;
+    const faction = data.faction || {};
+
+    const playerId = profile.player_id || data.player_id;
+    const playerName = profile.name || data.name;
+    const playerLevel = profile.level || data.level || 1;
+    const factionId = faction.faction_id || data.faction?.faction_id || null;
+    const factionName = faction.faction_name || data.faction?.faction_name || null;
 
     if (!playerId) {
       throw new HttpsError('internal', 'Failed to get player ID from Torn API');
@@ -242,18 +261,34 @@ exports.authenticateWithTornHttp = onRequest({
       throw new Error('Torn API key contains invalid characters');
     }
 
-    // Validate with Torn API
+    // Validate with Torn API v2
     console.log('[Auth-HTTP] Validating Torn API key...');
-    const response = await fetch(`https://api.torn.com/user/?selections=profile,faction&key=${sanitizedKey}`);
+    const tornEndpoint = `https://api.torn.com/v2/user/?selections=profile,faction&key=${sanitizedKey}`;
+    console.log('[Auth-HTTP] Calling Torn API v2 endpoint:', tornEndpoint.replace(sanitizedKey, '[REDACTED]'));
+
+    const response = await fetch(tornEndpoint);
+
+    console.log('[Auth-HTTP] Torn API response status:', {
+      status: response.status,
+      statusText: response.statusText,
+      ok: response.ok
+    });
 
     if (!response.ok) {
-      throw new Error('Failed to validate Torn API key');
+      console.error('[Auth-HTTP] Torn API HTTP error:', {
+        status: response.status,
+        statusText: response.statusText
+      });
+      throw new Error(`Failed to validate Torn API key (HTTP ${response.status})`);
     }
 
     const data = await response.json();
 
     if (data.error) {
-      console.error('[Auth-HTTP] Torn API error:', data.error);
+      console.error('[Auth-HTTP] Torn API error:', {
+        code: data.error.code,
+        message: data.error.error
+      });
       res.status(400).json({
         success: false,
         error: `Torn API error: ${data.error.error}`,
@@ -262,11 +297,17 @@ exports.authenticateWithTornHttp = onRequest({
       return;
     }
 
-    const playerId = data.player_id;
-    const playerName = data.name;
-    const playerLevel = data.level || 1;
-    const factionId = data.faction?.faction_id || null;
-    const factionName = data.faction?.faction_name || null;
+    // Parse v2 response structure with backward compatibility
+    // v2 structure: data.profile and data.faction
+    // v1 structure: direct fields (backward compatibility)
+    const profile = data.profile || data;
+    const faction = data.faction || {};
+
+    const playerId = profile.player_id || data.player_id;
+    const playerName = profile.name || data.name;
+    const playerLevel = profile.level || data.level || 1;
+    const factionId = faction.faction_id || data.faction?.faction_id || null;
+    const factionName = faction.faction_name || data.faction?.faction_name || null;
 
     if (!playerId) {
       throw new Error('Failed to get player ID from Torn API');
