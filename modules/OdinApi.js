@@ -586,6 +586,83 @@
     }
 
     // ============================================
+    // FACTION LEADER VERIFICATION
+    // ============================================
+    /**
+     * Verify if the current user is a verified faction leader
+     * Uses Torn API data to confirm leader/co-leader status
+     * @returns {Promise<boolean>} True if verified as leader, false otherwise
+     */
+    async function isVerifiedFactionLeader() {
+      try {
+        // Get user's faction data via their own API key
+        const userData = await tornGet('user', 'profile');
+
+        if (!userData || !userData.faction) {
+          return false; // Not in a faction
+        }
+
+        const position = (userData.faction.position || '').toLowerCase();
+
+        // Leader positions: "Leader", "Co-leader"
+        // Using case-insensitive comparison for robustness
+        return position === 'leader' || position === 'co-leader';
+      } catch (e) {
+        // Fail closed - if we can't verify, assume not a leader
+        log('[API] Leader verification failed:', e.message);
+        return false;
+      }
+    }
+
+    // ============================================
+    // CHAIN INFORMATION ROUTING
+    // ============================================
+    /**
+     * Get chain information with automatic routing based on permissions
+     * Non-leaders: uses /user?selections=bars (bars.chain)
+     * Leaders: uses /faction?selections=chain
+     * @returns {Promise<Object>} Normalized chain data
+     */
+    async function getChainInfo() {
+      const isLeader = await isVerifiedFactionLeader();
+
+      if (isLeader) {
+        // Use faction chain endpoint (more detailed, leader-only)
+        try {
+          const factionData = await tornGet('faction', 'chain');
+          const chain = factionData.chain || {};
+
+          return {
+            current: chain.current || 0,
+            maximum: chain.maximum || 0,
+            timeout: chain.timeout || 0,
+            modifier: chain.modifier || 1.0,
+            cooldown: chain.cooldown || 0,
+            start: chain.start || null,
+            source: 'faction'
+          };
+        } catch (e) {
+          log('[API] Faction chain access failed, falling back to user bars:', e.message);
+          // Fall through to user bars
+        }
+      }
+
+      // Non-leader or fallback: use user bars
+      const userData = await tornGet('user', 'bars');
+      const chain = userData.chain || {};
+
+      return {
+        current: chain.current || 0,
+        maximum: chain.maximum || 0,
+        timeout: chain.timeout || 0,
+        modifier: chain.modifier || 1.0,
+        cooldown: chain.cooldown || 0,
+        start: null, // Not available in bars
+        source: 'user'
+      };
+    }
+
+    // ============================================
     // ENRICHED DATA
     // ============================================
     async function getEnrichedPlayer(playerId, options = {}) {
@@ -820,6 +897,10 @@
       getFactionAttacks,
       getFactionWars,
       getFactionRankedWars,
+
+      // Access Control & Routing
+      isVerifiedFactionLeader,
+      getChainInfo,
 
       // TornStats API
       tornStatsGet,
