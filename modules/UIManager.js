@@ -199,10 +199,19 @@
             }
 
             await ctx.firebase.authenticateWithTorn(key);
-            setMsg('Authenticated. Loading tab...', 'success');
 
-            authUserPresent = !!(ctx.firebase.getCurrentUser && ctx.firebase.getCurrentUser());
-            renderTabContent(tabId);
+            // Get authenticated user info
+            const currentUser = ctx.firebase.getCurrentUser && ctx.firebase.getCurrentUser();
+            authUserPresent = !!currentUser;
+
+            // Show success message with user details
+            const userId = currentUser?.uid || 'Unknown';
+            setMsg('✓ Authentication successful! User ID: ' + userId + ' - Loading...', 'success');
+
+            // Wait a moment to show success message
+            setTimeout(() => {
+              renderTabContent(tabId);
+            }, 800);
           } catch (e) {
             setMsg('Authentication failed: ' + (e && e.message ? e.message : String(e)), 'error');
           }
@@ -220,6 +229,20 @@
       styles.id = 'odin-ui-styles';
 
       styles.textContent = `
+        /* Overlay/Backdrop (darker red tint) */
+        #odin-overlay {
+          position: fixed;
+          inset: 0;
+          background: rgba(139, 0, 0, 0.25);
+          z-index: 99997;
+          display: none;
+          backdrop-filter: blur(2px);
+          transition: opacity 0.3s ease;
+        }
+        #odin-overlay.visible {
+          display: block;
+        }
+
         /* Toggle Button */
         #odin-toggle-btn {
           position: fixed;
@@ -245,6 +268,7 @@
         }
         #odin-toggle-btn.active {
           background: linear-gradient(135deg, #e94560 0%, #c73e54 100%);
+          z-index: 99996;
         }
 
         /* Main Panel */
@@ -266,6 +290,43 @@
         }
         #odin-panel.visible { display: flex; }
 
+        /* Drag Bar */
+        .odin-drag-bar {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 8px 12px;
+          background: linear-gradient(90deg, #1a0a0a 0%, #2a0a0a 100%);
+          border-bottom: 1px solid rgba(233, 69, 96, 0.5);
+          border-radius: 11px 11px 0 0;
+          cursor: move;
+          user-select: none;
+        }
+        .odin-drag-bar-title {
+          color: #e94560;
+          font-size: 11px;
+          font-weight: 600;
+          letter-spacing: 0.5px;
+          text-transform: uppercase;
+        }
+        .odin-drag-bar-close {
+          width: 24px;
+          height: 24px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          border-radius: 4px;
+          color: #e94560;
+          font-size: 16px;
+          font-weight: 700;
+          transition: all 0.2s ease;
+        }
+        .odin-drag-bar-close:hover {
+          background: rgba(233, 69, 96, 0.2);
+          transform: scale(1.1);
+        }
+
         /* Header */
         .odin-header {
           display: flex;
@@ -274,7 +335,6 @@
           padding: 12px 16px;
           background: linear-gradient(90deg, #16213e 0%, #1a1a2e 100%);
           border-bottom: 1px solid #e94560;
-          border-radius: 11px 11px 0 0;
         }
         .odin-header-title {
           display: flex;
@@ -698,12 +758,23 @@
     }
 
     function createPanel() {
+      // Create overlay/backdrop
+      const overlay = document.createElement('div');
+      overlay.id = 'odin-overlay';
+      overlay.onclick = hidePanel;
+      document.body.appendChild(overlay);
+
       panelElement = document.createElement('div');
       panelElement.id = 'odin-panel';
 
       const connectionStatus = firebaseConnected ? 'connected' : 'connecting';
 
       panelElement.innerHTML = `
+        <div class="odin-drag-bar" id="odin-drag-bar">
+          <div class="odin-drag-bar-title">⚡ Drag to Move</div>
+          <div class="odin-drag-bar-close" id="odin-close-btn" title="Close">✕</div>
+        </div>
+
         <div class="odin-header">
           <div class="odin-header-title">
             <img src="https://i.postimg.cc/BQ6bSYKM/file-000000004bb071f5a96fc52564bf26ad-(1).png" alt="Odin" style="width:22px;height:22px;display:block;" />
@@ -736,6 +807,66 @@
       });
 
       document.body.appendChild(panelElement);
+
+      // Close button handler
+      const closeBtn = document.getElementById('odin-close-btn');
+      if (closeBtn) {
+        closeBtn.onclick = (e) => {
+          e.stopPropagation();
+          hidePanel();
+        };
+      }
+
+      // Drag functionality
+      const dragBar = document.getElementById('odin-drag-bar');
+      if (dragBar) {
+        let isDragging = false;
+        let currentX = 0;
+        let currentY = 0;
+        let initialX = 0;
+        let initialY = 0;
+
+        dragBar.addEventListener('mousedown', (e) => {
+          // Don't drag if clicking the close button
+          if (e.target.id === 'odin-close-btn' || e.target.closest('#odin-close-btn')) {
+            return;
+          }
+
+          isDragging = true;
+          const rect = panelElement.getBoundingClientRect();
+          initialX = e.clientX - rect.left;
+          initialY = e.clientY - rect.top;
+
+          dragBar.style.cursor = 'grabbing';
+        });
+
+        document.addEventListener('mousemove', (e) => {
+          if (!isDragging) return;
+
+          e.preventDefault();
+          currentX = e.clientX - initialX;
+          currentY = e.clientY - initialY;
+
+          // Keep panel within viewport
+          const maxX = window.innerWidth - panelElement.offsetWidth;
+          const maxY = window.innerHeight - panelElement.offsetHeight;
+
+          currentX = Math.max(0, Math.min(currentX, maxX));
+          currentY = Math.max(0, Math.min(currentY, maxY));
+
+          panelElement.style.right = 'auto';
+          panelElement.style.top = currentY + 'px';
+          panelElement.style.left = currentX + 'px';
+        });
+
+        document.addEventListener('mouseup', () => {
+          if (isDragging) {
+            isDragging = false;
+            dragBar.style.cursor = 'move';
+          }
+        });
+      }
+
       renderTabContent(activeTab);
     }
 
@@ -1380,23 +1511,33 @@
     // ============================================
     function togglePanel() {
       isVisible = !isVisible;
+      const overlay = document.getElementById('odin-overlay');
+
       panelElement.classList.toggle('visible', isVisible);
       toggleButton.classList.toggle('active', isVisible);
+      if (overlay) overlay.classList.toggle('visible', isVisible);
 
       if (isVisible) renderTabContent(activeTab);
     }
 
     function showPanel() {
       isVisible = true;
+      const overlay = document.getElementById('odin-overlay');
+
       panelElement.classList.add('visible');
       toggleButton.classList.add('active');
+      if (overlay) overlay.classList.add('visible');
+
       renderTabContent(activeTab);
     }
 
     function hidePanel() {
       isVisible = false;
+      const overlay = document.getElementById('odin-overlay');
+
       panelElement.classList.remove('visible');
       toggleButton.classList.remove('active');
+      if (overlay) overlay.classList.remove('visible');
     }
 
     // ============================================
@@ -1543,6 +1684,14 @@
         }
       });
 
+      nexus.on?.('AUTH_SUCCESS', (payload) => {
+        const playerName = payload?.playerName || 'User';
+        const factionName = payload?.factionName || 'No faction';
+        const message = `✓ Signed in as ${playerName} [${factionName}]`;
+        log('[UIManager] AUTH_SUCCESS:', message);
+        showToast(message, 'success');
+      });
+
       log('[UIManager] Ready');
     }
 
@@ -1551,6 +1700,9 @@
 
       if (panelElement) panelElement.remove();
       if (toggleButton) toggleButton.remove();
+
+      const overlay = document.getElementById('odin-overlay');
+      if (overlay) overlay.remove();
 
       const styles = document.getElementById('odin-ui-styles');
       if (styles) styles.remove();
