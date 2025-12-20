@@ -40,6 +40,152 @@
     );
   }
 
+  function findProfileHeader() {
+    // Find the profile header with the user's name
+    return (
+      document.querySelector('.profile-container .profile-wrapper .basic-information') ||
+      document.querySelector('.profile-wrapper .basic-information') ||
+      document.querySelector('[class*="basic-information"]') ||
+      document.querySelector('.content-title') ||
+      null
+    );
+  }
+
+  function injectProfileButtons(playerId, ctx) {
+    // Check if buttons already exist
+    if (document.querySelector('.odin-profile-buttons')) {
+      return;
+    }
+
+    const header = findProfileHeader();
+    if (!header) {
+      return;
+    }
+
+    // Create button container
+    const buttonContainer = document.createElement('div');
+    buttonContainer.className = 'odin-profile-buttons';
+    buttonContainer.style.cssText = `
+      display: inline-flex;
+      gap: 8px;
+      margin-left: 12px;
+      vertical-align: middle;
+    `;
+
+    // Create Claim button
+    const claimBtn = document.createElement('button');
+    claimBtn.className = 'odin-profile-btn odin-claim-btn';
+    claimBtn.textContent = '🎯 Claim';
+    claimBtn.title = 'Claim this target for attack';
+    claimBtn.style.cssText = `
+      padding: 6px 12px;
+      background: linear-gradient(135deg, #8B0000 0%, #6B0000 100%);
+      color: #fff;
+      border: 1px solid #8B0000;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      box-shadow: 0 2px 4px rgba(139, 0, 0, 0.3);
+    `;
+    claimBtn.onmouseover = () => {
+      claimBtn.style.transform = 'translateY(-1px)';
+      claimBtn.style.boxShadow = '0 4px 8px rgba(139, 0, 0, 0.4)';
+    };
+    claimBtn.onmouseout = () => {
+      claimBtn.style.transform = 'translateY(0)';
+      claimBtn.style.boxShadow = '0 2px 4px rgba(139, 0, 0, 0.3)';
+    };
+    claimBtn.onclick = () => {
+      if (ctx.nexus) {
+        ctx.nexus.emit('CLAIM_TARGET', { targetId: playerId, type: 'attack' });
+        showProfileToast('Target claimed!', 'success');
+      }
+    };
+
+    // Create Target button
+    const targetBtn = document.createElement('button');
+    targetBtn.className = 'odin-profile-btn odin-target-btn';
+    targetBtn.textContent = '📌 Add Target';
+    targetBtn.title = 'Add to faction target list';
+    targetBtn.style.cssText = `
+      padding: 6px 12px;
+      background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+      color: #fff;
+      border: 1px solid #3b82f6;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3);
+    `;
+    targetBtn.onmouseover = () => {
+      targetBtn.style.transform = 'translateY(-1px)';
+      targetBtn.style.boxShadow = '0 4px 8px rgba(59, 130, 246, 0.4)';
+    };
+    targetBtn.onmouseout = () => {
+      targetBtn.style.transform = 'translateY(0)';
+      targetBtn.style.boxShadow = '0 2px 4px rgba(59, 130, 246, 0.3)';
+    };
+    targetBtn.onclick = () => {
+      if (ctx.nexus) {
+        ctx.nexus.emit('ADD_TARGET', { targetId: playerId });
+        showProfileToast('Added to target list!', 'success');
+      }
+    };
+
+    // Add buttons to container
+    buttonContainer.appendChild(claimBtn);
+    buttonContainer.appendChild(targetBtn);
+
+    // Find a good place to insert the buttons
+    // Try to find the name element
+    const nameElement = header.querySelector('h4') || header.querySelector('.title-black') || header;
+
+    if (nameElement) {
+      // Insert after the name element
+      if (nameElement.nextSibling) {
+        nameElement.parentNode.insertBefore(buttonContainer, nameElement.nextSibling);
+      } else {
+        nameElement.parentNode.appendChild(buttonContainer);
+      }
+    } else {
+      // Fallback: append to header
+      header.appendChild(buttonContainer);
+    }
+  }
+
+  function showProfileToast(message, type = 'info') {
+    // Remove existing toast
+    const existing = document.querySelector('.odin-profile-toast');
+    if (existing) existing.remove();
+
+    const toast = document.createElement('div');
+    toast.className = 'odin-profile-toast';
+    toast.textContent = message;
+    toast.style.cssText = `
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      padding: 12px 20px;
+      border-radius: 8px;
+      color: #fff;
+      font-size: 13px;
+      font-weight: 500;
+      z-index: 100000;
+      animation: slideIn 0.3s ease;
+      ${type === 'success' ? 'background: #22c55e;' : type === 'error' ? 'background: #ef4444;' : 'background: #3b82f6;'}
+    `;
+
+    document.body.appendChild(toast);
+
+    setTimeout(() => {
+      toast.remove();
+    }, 3000);
+  }
+
   window.OdinModules.push(function UiProfileInjectionModuleInit(ctx) {
     const nexus = ctx.nexus;
     const log = ctx.log || console.log;
@@ -65,6 +211,14 @@
 
       if (sig === lastProfileId) return;
       lastProfileId = sig;
+
+      // Inject profile buttons if we have a valid player ID
+      if (playerId && playerId !== 'unknown') {
+        // Wait a bit for the page to fully render
+        setTimeout(() => {
+          injectProfileButtons(playerId, ctx);
+        }, 500);
+      }
 
       nexus.emit('PROFILE_VIEW_READY', {
         url: lastHref,
