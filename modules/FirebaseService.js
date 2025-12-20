@@ -278,11 +278,27 @@
       }
 
       log('[Firebase] ===== CALLING authenticateWithTorn =====');
-      log('[Firebase] API Key length:', key.length);
-      log('[Firebase] Functions instance:', {
-        exists: !!fn,
+      log('[Firebase] ===== ENHANCED DIAGNOSTICS =====');
+      log('[Firebase] 1. Firebase SDK Status:', {
+        firebaseLoaded: typeof window.firebase !== 'undefined',
+        firebaseVersion: window.firebase?.SDK_VERSION || 'unknown',
+        hasApp: typeof window.firebase?.app === 'function',
+        hasFunctions: typeof window.firebase?.functions === 'function'
+      });
+      log('[Firebase] 2. Functions Instance Status:', {
+        functionInstanceExists: !!fn,
+        functionInstanceType: typeof fn,
         hasHttpsCallable: !!(fn && typeof fn.httpsCallable === 'function'),
-        functionsType: typeof fn
+        httpscallableType: typeof fn?.httpsCallable
+      });
+      log('[Firebase] 3. Region Configuration:', {
+        targetRegion: 'us-central1',
+        note: 'MUST match Cloud Run deployment region'
+      });
+      log('[Firebase] 4. Request Details:', {
+        apiKeyLength: key.length,
+        apiKeyFormat: /^[a-zA-Z0-9]{16}$/.test(key) ? 'valid' : 'invalid',
+        payload: { apiKey: '<redacted>' }
       });
 
       try {
@@ -294,7 +310,7 @@
         const callable = fn.httpsCallable('authenticateWithTorn');
         log('[Firebase] ✓ Created httpsCallable for authenticateWithTorn');
         log('[Firebase] ✓ Callable type:', typeof callable);
-        log('[Firebase] Invoking callable with payload: { apiKey: <' + key.length + ' chars> }');
+        log('[Firebase] ✓ Invoking callable with payload: { apiKey: <' + key.length + ' chars> }');
 
         const res = await callable({ apiKey: key });
 
@@ -340,16 +356,24 @@
         return true;
       } catch (error) {
         log('[Firebase] ===== AUTHENTICATION ERROR =====');
-        log('[Firebase] Error type:', error.constructor.name);
+        log('[Firebase] ===== DETAILED ERROR OBJECT =====');
+        log('[Firebase] Error constructor:', error.constructor?.name || 'unknown');
         log('[Firebase] Error code:', error.code || 'none');
         log('[Firebase] Error message:', error.message || 'none');
-        log('[Firebase] Error details:', {
+        log('[Firebase] Error name:', error.name || 'none');
+        log('[Firebase] All error fields:', {
           code: error.code,
           message: error.message,
           name: error.name,
-          details: error.details || 'none',
-          stack: error.stack?.substring(0, 300)
+          details: error.details,
+          customData: error.customData,
+          serverResponse: error.serverResponse,
+          status: error.status,
+          statusCode: error.statusCode,
+          stack: error.stack?.substring(0, 500)
         });
+        log('[Firebase] Full error object keys:', Object.keys(error));
+        log('[Firebase] Error toString:', String(error));
 
         // Extract meaningful error message from HttpsError
         let errorMessage = 'Authentication failed';
