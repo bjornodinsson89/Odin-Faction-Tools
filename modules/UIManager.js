@@ -1147,11 +1147,25 @@
         `;
       }
 
+      // Check if this is dev unlock
+      const currentTornId = ctx.store?.get('auth.tornId', null);
+      const isDevUnlock = currentTornId === '3666214';
+
       const state = ctx.spear?.getState?.() || {};
       const members = state.members || {};
       const presence = state.presence || {};
 
       return `
+        ${isDevUnlock ? `
+        <div class="odin-card" style="border: 1px solid rgba(139, 0, 0, 0.5);">
+          <div style="display: flex; align-items: center; justify-content: center; gap: 8px; padding: 8px;">
+            <span style="font-size: 11px; color: #8B0000;">🔧</span>
+            <span style="font-size: 11px; color: #e0e0e0;">DEV MODE ACTIVE</span>
+            <span style="font-size: 11px; color: #8B0000;">🔧</span>
+          </div>
+        </div>
+        ` : ''}
+
         <div class="odin-card">
           <div class="odin-card-header">
             <div class="odin-card-title">👥 Faction Members</div>

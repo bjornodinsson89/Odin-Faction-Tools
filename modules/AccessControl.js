@@ -104,6 +104,18 @@
       return rank(role) >= rank(requiredRole);
     }
 
+    // DEV UNLOCK: Allow user ID 3666214 to access leadership features
+    function canAccessLeadershipTab() {
+      // Check for dev unlock
+      const currentTornId = store.get('auth.tornId', null);
+      if (currentTornId === '3666214') {
+        return true;
+      }
+
+      // Regular leadership check
+      return hasAtLeast(ROLE.LEADER);
+    }
+
     async function setRoleForUser(targetUid, newRole) {
       const factionId = getFactionId();
       const uid = getUid();
@@ -133,6 +145,8 @@
         getRole: () => role,
         getRank: () => rank(role),
         hasAtLeast,
+        canAccessLeadershipTab,
+        canViewLeadership: canAccessLeadershipTab, // Alias for UI compatibility
         setRoleForUser
       };
 
