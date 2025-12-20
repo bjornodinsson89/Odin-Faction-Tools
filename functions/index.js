@@ -15,16 +15,35 @@ admin.initializeApp();
  */
 exports.authenticateWithTorn = onCall({
   region: 'us-central1',
-  cors: ['https://www.torn.com', 'https://torn.com']
+  cors: ['https://www.torn.com', 'https://www2.torn.com', 'https://torn.com']
 }, async (request) => {
   // ===== ENTRY LOGGING =====
   console.log('[Auth] ===== authenticateWithTorn ENTRY =====');
-  console.log('[Auth] Request received:', {
+  console.log('[Auth] ===== ENHANCED REQUEST DIAGNOSTICS =====');
+  console.log('[Auth] 1. Request Type:', {
+    isCallable: true,
+    method: 'CALLABLE (not HTTP GET/POST)',
+    note: 'This is a Cloud Callable Function, not an HTTP endpoint'
+  });
+  console.log('[Auth] 2. Request Data:', {
     hasData: !!request.data,
+    dataType: typeof request.data,
     dataKeys: request.data ? Object.keys(request.data) : [],
     hasApiKey: !!(request.data && request.data.apiKey),
     apiKeyLength: (request.data && request.data.apiKey) ? request.data.apiKey.length : 0,
-    rawDataType: typeof request.rawRequest?.body
+    apiKeyType: typeof request.data?.apiKey
+  });
+  console.log('[Auth] 3. Raw Request Info:', {
+    hasRawRequest: !!request.rawRequest,
+    rawMethod: request.rawRequest?.method || 'unknown',
+    rawUrl: request.rawRequest?.url || 'unknown',
+    rawHeaders: request.rawRequest?.headers ? Object.keys(request.rawRequest.headers) : [],
+    contentType: request.rawRequest?.headers?.['content-type'] || 'unknown'
+  });
+  console.log('[Auth] 4. Auth Context:', {
+    hasAuth: !!request.auth,
+    isAuthenticated: !!request.auth?.uid,
+    uid: request.auth?.uid || 'none (expected for initial auth)'
   });
 
   const apiKey = request.data.apiKey;
@@ -180,7 +199,7 @@ exports.authenticateWithTorn = onCall({
  */
 exports.authenticateWithTornHttp = onRequest({
   region: 'us-central1',
-  cors: ['https://www.torn.com', 'https://torn.com']
+  cors: ['https://www.torn.com', 'https://www2.torn.com', 'https://torn.com']
 }, async (req, res) => {
   console.log('[Auth-HTTP] ===== HTTP DIAGNOSTIC ENDPOINT CALLED =====');
   console.log('[Auth-HTTP] Method:', req.method);
