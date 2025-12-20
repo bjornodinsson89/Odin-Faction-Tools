@@ -14,8 +14,7 @@ admin.initializeApp();
  * Validates the key with Torn API, creates/updates user, and returns custom token
  */
 exports.authenticateWithTorn = onCall({
-  region: 'us-central1',
-  cors: ['https://www.torn.com', 'https://www2.torn.com', 'https://torn.com']
+  region: 'us-central1'
 }, async (request) => {
   // ===== ENTRY LOGGING =====
   console.log('[Auth] ===== authenticateWithTorn ENTRY =====');
@@ -191,17 +190,27 @@ exports.authenticateWithTorn = onCall({
 
   } catch (error) {
     // Log only safe properties to avoid circular reference errors
-    console.error('[Auth] Authentication error:', {
+    console.error('[Auth] ===== CRITICAL ERROR =====');
+    console.error('[Auth] Error caught in main try/catch:', {
+      name: error?.name,
       message: error?.message,
       code: error?.code,
+      errno: error?.errno,
+      syscall: error?.syscall,
+      type: typeof error,
+      constructor: error?.constructor?.name,
       stack: error?.stack
     });
 
+    // If it's already an HttpsError, re-throw it
     if (error instanceof HttpsError) {
+      console.error('[Auth] Re-throwing HttpsError:', error.code, error.message);
       throw error;
     }
 
-    throw new HttpsError('internal', `Authentication failed: ${error.message}`);
+    // For other errors, log more detail and throw as internal error
+    console.error('[Auth] Throwing new internal HttpsError');
+    throw new HttpsError('internal', `Authentication failed: ${error.message || 'Unknown error'}`);
   }
 });
 
