@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Odin Faction Tools
 // @namespace    http://tampermonkey.net/
-// @version      5.1.0
-// @description  Torn City faction management tools with Firebase backend and comprehensive logging
+// @version      5.1.1
+// @description  Torn City faction management tools with Firebase backend, comprehensive logging, and profile actions
 // @author       BjornOdinsson89
 // @match        https://www.torn.com/*
 // @icon         https://i.postimg.cc/BQ6bSYKM/file-000000004bb071f5a96fc52564bf26ad-(1).png
@@ -28,6 +28,7 @@
 // @require      https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/main/modules/OdinApi.js
 // @require      https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/main/modules/NeuralNetwork.js
 // @require      https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/main/modules/freki.js
+// @require      https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/main/modules/ActionHandler.js
 // @require      https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/main/modules/UIManager.js
 // @require      https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/main/modules/ui-profile-injection.js
 // ==/UserScript==
@@ -39,7 +40,7 @@
      ODIN FACTION TOOLS - MAIN ENTRY POINT
      ============================================================ */
 
-  console.log('[Odin] Initializing Odin Faction Tools v5.1.0');
+  console.log('[Odin] Initializing Odin Faction Tools v5.1.1');
 
   // Verify Firebase is loaded
   if (typeof window.firebase === 'undefined') {
@@ -114,6 +115,7 @@
     'AccessControl.js',            // Role management
     'OdinApi.js',                  // API client
     'freki.js',                    // AI scoring
+    'ActionHandler.js',            // Action handlers (targets, claims)
     'UIManager.js',                // UI
     'ui-profile-injection.js'      // Profile injection
   ];

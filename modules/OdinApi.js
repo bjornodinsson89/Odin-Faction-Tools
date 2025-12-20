@@ -15,10 +15,11 @@
   window.OdinModules.push(function OdinApiModuleInit(OdinContext) {
     const ctx = OdinContext || {};
     const storage = ctx.storage || { getJSON: () => null, setJSON: () => {}, get: () => null, set: () => {} };
+    const nexus = ctx.nexus || { emit: () => {}, on: () => () => {} };
     const log = ctx.log || console.log;
     const error = ctx.error || console.error;
 
-    const API_VERSION = '5.0.0';
+    const API_VERSION = '5.0.1';
 
     // ============================================
     // CONFIGURATION
@@ -288,25 +289,71 @@
         ms: 0
       };
 
+      // Emit API call start event for logging
+      nexus.emit?.('API_CALL_START', {
+        service: 'torn',
+        endpoint: endpoint,
+        url: url,
+        method: 'GET',
+        cached: false
+      });
+
       try {
         const data = await requestWithRetry(url);
+        const duration = Math.round(performance.now() - startTime);
+
         logEntry.ok = true;
-        logEntry.ms = Math.round(performance.now() - startTime);
+        logEntry.ms = duration;
         logApiCall(logEntry);
 
         if (data && data.error) {
           const err = new Error(`Torn API Error: ${data.error.error || data.error.message || 'Unknown'}`);
           err.code = data.error.code;
+
+          // Emit API call error event
+          nexus.emit?.('API_CALL_ERROR', {
+            service: 'torn',
+            endpoint: endpoint,
+            url: url,
+            method: 'GET',
+            error: err.message,
+            duration: duration,
+            statusCode: data.error.code
+          });
+
           throw err;
         }
+
+        // Emit API call success event
+        nexus.emit?.('API_CALL_SUCCESS', {
+          service: 'torn',
+          endpoint: endpoint,
+          url: url,
+          method: 'GET',
+          duration: duration,
+          cached: false
+        });
 
         setCache(cacheKey, data, CONFIG.torn.cacheTime);
         return data;
       } catch (e) {
+        const duration = Math.round(performance.now() - startTime);
+
         logEntry.ok = false;
-        logEntry.ms = Math.round(performance.now() - startTime);
+        logEntry.ms = duration;
         logEntry.error = e.message;
         logApiCall(logEntry);
+
+        // Emit API call error event
+        nexus.emit?.('API_CALL_ERROR', {
+          service: 'torn',
+          endpoint: endpoint,
+          url: url,
+          method: 'GET',
+          error: e.message,
+          duration: duration
+        });
+
         throw e;
       }
     }
@@ -340,33 +387,74 @@
       url += '?' + urlParams.toString();
 
       const startTime = performance.now();
-      const logEntry = {
-        ts: Date.now(),
+
+      nexus.emit?.('API_CALL_START', {
         service: 'tornV2',
-        endpoint,
-        ok: false,
-        ms: 0
-      };
+        endpoint: endpoint,
+        url: url,
+        method: 'GET'
+      });
 
       try {
         const data = await requestWithRetry(url);
-        logEntry.ok = true;
-        logEntry.ms = Math.round(performance.now() - startTime);
-        logApiCall(logEntry);
+        const duration = Math.round(performance.now() - startTime);
+
+        logApiCall({
+          ts: Date.now(),
+          service: 'tornV2',
+          endpoint,
+          ok: true,
+          ms: duration
+        });
 
         if (data && data.error) {
           const err = new Error(`Torn API V2 Error: ${data.error.error || data.error.message || 'Unknown'}`);
           err.code = data.error.code;
+
+          nexus.emit?.('API_CALL_ERROR', {
+            service: 'tornV2',
+            endpoint: endpoint,
+            url: url,
+            method: 'GET',
+            error: err.message,
+            duration: duration,
+            statusCode: data.error.code
+          });
+
           throw err;
         }
+
+        nexus.emit?.('API_CALL_SUCCESS', {
+          service: 'tornV2',
+          endpoint: endpoint,
+          url: url,
+          method: 'GET',
+          duration: duration
+        });
 
         setCache(cacheKey, data, CONFIG.torn.cacheTime);
         return data;
       } catch (e) {
-        logEntry.ok = false;
-        logEntry.ms = Math.round(performance.now() - startTime);
-        logEntry.error = e.message;
-        logApiCall(logEntry);
+        const duration = Math.round(performance.now() - startTime);
+
+        logApiCall({
+          ts: Date.now(),
+          service: 'tornV2',
+          endpoint,
+          ok: false,
+          ms: duration,
+          error: e.message
+        });
+
+        nexus.emit?.('API_CALL_ERROR', {
+          service: 'tornV2',
+          endpoint: endpoint,
+          url: url,
+          method: 'GET',
+          error: e.message,
+          duration: duration
+        });
+
         throw e;
       }
     }
@@ -497,29 +585,58 @@
       await waitForRateLimit('tornStats');
 
       const url = `${CONFIG.tornStats.baseUrlV2}/${tornStatsApiKey}/${endpoint}`;
-
       const startTime = performance.now();
-      const logEntry = {
-        ts: Date.now(),
+
+      nexus.emit?.('API_CALL_START', {
         service: 'tornStats',
-        endpoint,
-        ok: false,
-        ms: 0
-      };
+        endpoint: endpoint,
+        url: url,
+        method: 'GET'
+      });
 
       try {
         const data = await requestWithRetry(url);
-        logEntry.ok = true;
-        logEntry.ms = Math.round(performance.now() - startTime);
-        logApiCall(logEntry);
+        const duration = Math.round(performance.now() - startTime);
+
+        logApiCall({
+          ts: Date.now(),
+          service: 'tornStats',
+          endpoint,
+          ok: true,
+          ms: duration
+        });
+
+        nexus.emit?.('API_CALL_SUCCESS', {
+          service: 'tornStats',
+          endpoint: endpoint,
+          url: url,
+          method: 'GET',
+          duration: duration
+        });
 
         setCache(cacheKey, data, CONFIG.tornStats.cacheTime);
         return data;
       } catch (e) {
-        logEntry.ok = false;
-        logEntry.ms = Math.round(performance.now() - startTime);
-        logEntry.error = e.message;
-        logApiCall(logEntry);
+        const duration = Math.round(performance.now() - startTime);
+
+        logApiCall({
+          ts: Date.now(),
+          service: 'tornStats',
+          endpoint,
+          ok: false,
+          ms: duration,
+          error: e.message
+        });
+
+        nexus.emit?.('API_CALL_ERROR', {
+          service: 'tornStats',
+          endpoint: endpoint,
+          url: url,
+          method: 'GET',
+          error: e.message,
+          duration: duration
+        });
+
         throw e;
       }
     }
@@ -552,27 +669,57 @@
       }
 
       const startTime = performance.now();
-      const logEntry = {
-        ts: Date.now(),
+
+      nexus.emit?.('API_CALL_START', {
         service: 'ffScouter',
-        endpoint,
-        ok: false,
-        ms: 0
-      };
+        endpoint: endpoint,
+        url: url,
+        method: 'GET'
+      });
 
       try {
         const data = await requestWithRetry(url);
-        logEntry.ok = true;
-        logEntry.ms = Math.round(performance.now() - startTime);
-        logApiCall(logEntry);
+        const duration = Math.round(performance.now() - startTime);
+
+        logApiCall({
+          ts: Date.now(),
+          service: 'ffScouter',
+          endpoint,
+          ok: true,
+          ms: duration
+        });
+
+        nexus.emit?.('API_CALL_SUCCESS', {
+          service: 'ffScouter',
+          endpoint: endpoint,
+          url: url,
+          method: 'GET',
+          duration: duration
+        });
 
         setCache(cacheKey, data, CONFIG.ffScouter.cacheTime);
         return data;
       } catch (e) {
-        logEntry.ok = false;
-        logEntry.ms = Math.round(performance.now() - startTime);
-        logEntry.error = e.message;
-        logApiCall(logEntry);
+        const duration = Math.round(performance.now() - startTime);
+
+        logApiCall({
+          ts: Date.now(),
+          service: 'ffScouter',
+          endpoint,
+          ok: false,
+          ms: duration,
+          error: e.message
+        });
+
+        nexus.emit?.('API_CALL_ERROR', {
+          service: 'ffScouter',
+          endpoint: endpoint,
+          url: url,
+          method: 'GET',
+          error: e.message,
+          duration: duration
+        });
+
         throw e;
       }
     }
