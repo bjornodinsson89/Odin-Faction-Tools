@@ -298,7 +298,8 @@
       log('[Firebase] 4. Request Details:', {
         apiKeyLength: key.length,
         apiKeyFormat: /^[a-zA-Z0-9]{16}$/.test(key) ? 'valid' : 'invalid',
-        payload: { apiKey: '<redacted>' }
+        payload: { apiKey: '<redacted>' },
+        method: 'Firebase SDK httpsCallable (auto-wraps in { data: {...} })'
       });
 
       try {
@@ -319,17 +320,26 @@
           hasData: !!res.data,
           dataKeys: res.data ? Object.keys(res.data) : [],
           success: res.data?.success,
-          hasToken: !!(res.data?.token)
+          hasToken: !!(res.data?.token),
+          tokenLength: res.data?.token ? String(res.data.token).length : 0,
+          playerId: res.data?.playerId || 'N/A',
+          playerName: res.data?.playerName || 'N/A',
+          factionId: res.data?.factionId || 'N/A',
+          factionName: res.data?.factionName || 'N/A'
         });
 
         const token = res && res.data && res.data.token ? String(res.data.token) : '';
         if (!token) {
           const errorMsg = res && res.data && res.data.error ? res.data.error : 'Unknown error';
           log('[Firebase] ERROR: No token received from cloud function');
+          log('[Firebase] Full response object:', res);
           throw new Error('Authentication failed: ' + errorMsg);
         }
 
-        log('[Firebase] ✓ Token received, signing in with custom token...');
+        log('[Firebase] ✓ Token received (length: ' + token.length + ' chars)');
+        log('[Firebase] ✓ Player info: ' + (res.data.playerName || 'N/A') + ' [ID: ' + (res.data.playerId || 'N/A') + ']');
+        log('[Firebase] ✓ Faction: ' + (res.data.factionName || 'None') + ' [ID: ' + (res.data.factionId || 'N/A') + ']');
+        log('[Firebase] ✓ Signing in with custom token...');
 
         // Wait for auth state to be fully established
         const authPromise = new Promise((resolve, reject) => {
@@ -350,9 +360,23 @@
         await auth.signInWithCustomToken(token);
         log('[Firebase] ✓ signInWithCustomToken completed, waiting for auth state...');
 
-        await authPromise; // Wait for the auth state to propagate
+        const user = await authPromise; // Wait for the auth state to propagate
 
         log('[Firebase] ===== AUTHENTICATION SUCCESSFUL =====');
+        log('[Firebase] ✓ Authenticated user UID:', user.uid);
+        log('[Firebase] ✓ Player: ' + (res.data.playerName || user.uid));
+        log('[Firebase] ✓ Faction: ' + (res.data.factionName || 'None'));
+        log('[Firebase] ✓ Database access granted');
+
+        // Emit success event with user info for UI
+        nexus.emit('AUTH_SUCCESS', {
+          uid: user.uid,
+          playerId: res.data?.playerId,
+          playerName: res.data?.playerName,
+          factionId: res.data?.factionId,
+          factionName: res.data?.factionName
+        });
+
         return true;
       } catch (error) {
         log('[Firebase] ===== AUTHENTICATION ERROR =====');
