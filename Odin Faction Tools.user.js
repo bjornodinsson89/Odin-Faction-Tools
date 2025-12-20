@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Odin Faction Tools
 // @namespace    http://tampermonkey.net/
-// @version      5.0.1
-// @description  Torn City faction management tools with Firebase backend
+// @version      5.1.1
+// @description  Torn City faction management tools with Firebase backend, comprehensive logging, and profile actions
 // @author       BjornOdinsson89
 // @match        https://www.torn.com/*
 // @icon         https://i.postimg.cc/BQ6bSYKM/file-000000004bb071f5a96fc52564bf26ad-(1).png
@@ -22,11 +22,13 @@
 // @require      https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js
 // @require      https://www.gstatic.com/firebasejs/10.7.1/firebase-functions-compat.js
 // @require      https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/main/modules/odins-spear-core.js
+// @require      https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/main/modules/LogManager.js
 // @require      https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/main/modules/FirebaseService.js
 // @require      https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/main/modules/AccessControl.js
 // @require      https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/main/modules/OdinApi.js
 // @require      https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/main/modules/NeuralNetwork.js
 // @require      https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/main/modules/freki.js
+// @require      https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/main/modules/ActionHandler.js
 // @require      https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/main/modules/UIManager.js
 // @require      https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/main/modules/ui-profile-injection.js
 // ==/UserScript==
@@ -38,7 +40,7 @@
      ODIN FACTION TOOLS - MAIN ENTRY POINT
      ============================================================ */
 
-  console.log('[Odin] Initializing Odin Faction Tools v5.0.1');
+  console.log('[Odin] Initializing Odin Faction Tools v5.1.1');
 
   // Verify Firebase is loaded
   if (typeof window.firebase === 'undefined') {
@@ -107,11 +109,13 @@
      ============================================================ */
   const LOAD_ORDER = [
     'odins-spear-core.js',        // Core runtime
+    'LogManager.js',               // Logging system
     'NeuralNetwork.js',            // Neural network for Freki
     'FirebaseService.js',          // Firebase + Firestore
     'AccessControl.js',            // Role management
     'OdinApi.js',                  // API client
     'freki.js',                    // AI scoring
+    'ActionHandler.js',            // Action handlers (targets, claims)
     'UIManager.js',                // UI
     'ui-profile-injection.js'      // Profile injection
   ];

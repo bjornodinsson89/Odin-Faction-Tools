@@ -762,6 +762,75 @@
         }
         .odin-member-name { color: #60a5fa; font-size: 13px; }
         .odin-member-status { font-size: 11px; }
+
+        /* Log Console */
+        .odin-log-console {
+          max-height: 400px;
+          overflow-y: auto;
+          background: rgba(0, 0, 0, 0.4);
+          border: 1px solid rgba(139, 0, 0, 0.2);
+          border-radius: 6px;
+          padding: 8px;
+          font-family: 'Courier New', monospace;
+          font-size: 11px;
+        }
+        .odin-log-console::-webkit-scrollbar { width: 6px; }
+        .odin-log-console::-webkit-scrollbar-track { background: #1a1a2e; }
+        .odin-log-console::-webkit-scrollbar-thumb { background: #8B0000; border-radius: 3px; }
+
+        .odin-log-entry {
+          padding: 4px 6px;
+          margin-bottom: 2px;
+          border-left: 3px solid transparent;
+          border-radius: 3px;
+          display: flex;
+          gap: 8px;
+          align-items: flex-start;
+        }
+        .odin-log-entry.log-error {
+          background: rgba(239, 68, 68, 0.1);
+          border-left-color: #ef4444;
+        }
+        .odin-log-entry.log-api {
+          background: rgba(59, 130, 246, 0.1);
+          border-left-color: #3b82f6;
+        }
+        .odin-log-entry.log-db {
+          background: rgba(245, 158, 11, 0.1);
+          border-left-color: #f59e0b;
+        }
+        .odin-log-entry.log-network {
+          background: rgba(34, 197, 94, 0.1);
+          border-left-color: #22c55e;
+        }
+        .odin-log-entry.log-event {
+          background: rgba(168, 85, 247, 0.1);
+          border-left-color: #a855f7;
+        }
+        .odin-log-time {
+          color: #6b7280;
+          min-width: 70px;
+          flex-shrink: 0;
+        }
+        .odin-log-type {
+          color: #8B0000;
+          min-width: 100px;
+          flex-shrink: 0;
+          text-transform: uppercase;
+          font-weight: 600;
+        }
+        .odin-log-content {
+          color: #e0e0e0;
+          flex: 1;
+          word-break: break-word;
+        }
+        .odin-log-content a {
+          color: #60a5fa;
+          text-decoration: underline;
+        }
+        .odin-log-content a:hover {
+          color: #93c5fd;
+        }
       `;
 
       document.head.appendChild(styles);
@@ -1230,6 +1299,138 @@
       `;
     }
 
+    function renderLogConsole() {
+      const logManager = ctx.logManager || window.OdinLogManager;
+      if (!logManager) {
+        return '<div style="color: #6b7280; padding: 10px;">Log manager not initialized</div>';
+      }
+
+      const stats = logManager.getLogStats();
+      const recentLogs = logManager.getLogs({ limit: 50 });
+
+      return `
+        <div class="odin-card">
+          <div class="odin-card-header">
+            <div class="odin-card-title">📊 Log Statistics</div>
+          </div>
+          <div class="odin-stats-grid">
+            <div class="odin-stat-item">
+              <div class="odin-stat-value">${stats.total}</div>
+              <div class="odin-stat-label">Total Logs</div>
+            </div>
+            <div class="odin-stat-item">
+              <div class="odin-stat-value">${stats.errors}</div>
+              <div class="odin-stat-label">Errors</div>
+            </div>
+            <div class="odin-stat-item">
+              <div class="odin-stat-value">${stats.apiCalls}</div>
+              <div class="odin-stat-label">API Calls</div>
+            </div>
+            <div class="odin-stat-item">
+              <div class="odin-stat-value">${stats.databaseCalls}</div>
+              <div class="odin-stat-label">DB Calls</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="odin-card">
+          <div class="odin-card-header">
+            <div class="odin-card-title">🔍 Filter Logs</div>
+          </div>
+          <div class="odin-form-group">
+            <label class="odin-form-label">Log Type</label>
+            <select id="odin-log-filter-type" class="odin-select">
+              <option value="all">All Logs</option>
+              <option value="errors">Errors Only</option>
+              <option value="apiCalls">API Calls</option>
+              <option value="databaseCalls">Database Calls</option>
+              <option value="networkCalls">Network Calls</option>
+              <option value="events">Events</option>
+            </select>
+          </div>
+          <div class="odin-form-group">
+            <label class="odin-form-label">Search</label>
+            <input type="text" id="odin-log-search" class="odin-input" placeholder="Search logs...">
+          </div>
+          <div style="display: flex; gap: 8px; margin-top: 10px;">
+            <button class="odin-btn odin-btn-secondary" onclick="window.OdinUI.filterLogs()">
+              🔍 Filter
+            </button>
+            <button class="odin-btn odin-btn-secondary" onclick="window.OdinUI.refreshLogs()">
+              🔄 Refresh
+            </button>
+          </div>
+        </div>
+
+        <div class="odin-card">
+          <div class="odin-card-header">
+            <div class="odin-card-title">📋 Log Console</div>
+            <div style="display: flex; gap: 6px;">
+              <button class="odin-btn odin-btn-small odin-btn-secondary" onclick="window.OdinUI.copyLogs()">
+                📋 Copy
+              </button>
+              <button class="odin-btn odin-btn-small odin-btn-primary" onclick="window.OdinUI.sendLogsToBjorn()">
+                📧 Send to Bjorn
+              </button>
+              <button class="odin-btn odin-btn-small odin-btn-danger" onclick="window.OdinUI.clearLogs()">
+                🗑️ Clear
+              </button>
+            </div>
+          </div>
+          <div id="odin-log-console" class="odin-log-console">
+            ${renderLogEntries(recentLogs)}
+          </div>
+        </div>
+      `;
+    }
+
+    function renderLogEntries(logs) {
+      if (!logs || logs.length === 0) {
+        return '<div style="color: #6b7280; padding: 10px; text-align: center;">No logs to display</div>';
+      }
+
+      return logs.map(entry => {
+        const timestamp = new Date(entry.timestamp).toLocaleTimeString();
+        const typeClass = entry.type === 'errors' ? 'log-error' :
+                         entry.type === 'apiCalls' ? 'log-api' :
+                         entry.type === 'databaseCalls' ? 'log-db' :
+                         entry.type === 'networkCalls' ? 'log-network' : 'log-event';
+
+        let content = '';
+        switch (entry.type) {
+          case 'errors':
+            content = `<strong>${entry.message}</strong>`;
+            break;
+          case 'apiCalls':
+            const apiUrl = entry.url || `${entry.service}/${entry.endpoint}`;
+            const apiLink = entry.url && entry.url.startsWith('http')
+              ? `<a href="${entry.url}" target="_blank" style="color: #60a5fa;">${apiUrl}</a>`
+              : apiUrl;
+            content = `${entry.method || 'GET'} ${apiLink} - ${entry.status} (${entry.duration || 0}ms)`;
+            break;
+          case 'databaseCalls':
+            content = `${entry.operation} ${entry.path} [${entry.direction}] - ${entry.status} (${entry.duration || 0}ms)`;
+            break;
+          case 'networkCalls':
+            const netLink = entry.url && entry.url.startsWith('http')
+              ? `<a href="${entry.url}" target="_blank" style="color: #60a5fa;">${entry.url}</a>`
+              : entry.url;
+            content = `${entry.method} ${netLink} [${entry.direction}] - ${entry.status}`;
+            break;
+          default:
+            content = JSON.stringify(entry.data || {});
+        }
+
+        return `
+          <div class="odin-log-entry ${typeClass}">
+            <span class="odin-log-time">${timestamp}</span>
+            <span class="odin-log-type">[${entry.type}]</span>
+            <span class="odin-log-content">${content}</span>
+          </div>
+        `;
+      }).join('');
+    }
+
     function renderSettingsTab() {
       const settings = ctx.settings || {};
       const tornKeyExists = !!(ctx.api?.getTornApiKey?.() && String(ctx.api.getTornApiKey()).length > 8);
@@ -1348,6 +1549,8 @@
             </div>
           </div>
         </div>
+
+        ${renderLogConsole()}
       `;
     }
 
@@ -1699,6 +1902,124 @@
         setTimeout(() => {
           switchTab('warRoom');
         }, 500);
+      },
+
+      // Log Console Functions
+      filterLogs: () => {
+        const logManager = ctx.logManager || window.OdinLogManager;
+        if (!logManager) {
+          showToast('Log manager not available', 'error');
+          return;
+        }
+
+        const typeSelect = document.getElementById('odin-log-filter-type');
+        const searchInput = document.getElementById('odin-log-search');
+        const type = typeSelect ? typeSelect.value : 'all';
+        const search = searchInput ? searchInput.value : '';
+
+        const filteredLogs = logManager.getLogs({
+          type: type,
+          limit: 50,
+          search: search || null
+        });
+
+        const logConsole = document.getElementById('odin-log-console');
+        if (logConsole) {
+          logConsole.innerHTML = renderLogEntries(filteredLogs);
+        }
+
+        showToast(`Filtered ${filteredLogs.length} logs`, 'info');
+      },
+
+      refreshLogs: () => {
+        renderTabContent('settings');
+        showToast('Logs refreshed', 'success');
+      },
+
+      copyLogs: async () => {
+        const logManager = ctx.logManager || window.OdinLogManager;
+        if (!logManager) {
+          showToast('Log manager not available', 'error');
+          return;
+        }
+
+        try {
+          const typeSelect = document.getElementById('odin-log-filter-type');
+          const searchInput = document.getElementById('odin-log-search');
+          const type = typeSelect ? typeSelect.value : 'all';
+          const search = searchInput ? searchInput.value : '';
+
+          const logsText = logManager.exportLogsRedacted({
+            type: type,
+            limit: 500,
+            search: search || null
+          });
+
+          // Copy to clipboard
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(logsText);
+            showToast('Logs copied to clipboard!', 'success');
+          } else {
+            // Fallback for older browsers
+            const textarea = document.createElement('textarea');
+            textarea.value = logsText;
+            textarea.style.position = 'fixed';
+            textarea.style.opacity = '0';
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textarea);
+            showToast('Logs copied to clipboard!', 'success');
+          }
+        } catch (error) {
+          showToast('Failed to copy logs: ' + error.message, 'error');
+        }
+      },
+
+      sendLogsToBjorn: async () => {
+        const logManager = ctx.logManager || window.OdinLogManager;
+        if (!logManager) {
+          showToast('Log manager not available', 'error');
+          return;
+        }
+
+        try {
+          const typeSelect = document.getElementById('odin-log-filter-type');
+          const searchInput = document.getElementById('odin-log-search');
+          const type = typeSelect ? typeSelect.value : 'all';
+          const search = searchInput ? searchInput.value : '';
+
+          const result = await logManager.emailLogs('bjornodinsson89@gmail.com', {
+            type: type,
+            limit: 500,
+            search: search || null
+          });
+
+          if (result.success) {
+            showToast('Opening email client...', 'success');
+          } else {
+            showToast('Failed to send logs: ' + result.message, 'error');
+          }
+        } catch (error) {
+          showToast('Failed to send logs: ' + error.message, 'error');
+        }
+      },
+
+      clearLogs: () => {
+        const logManager = ctx.logManager || window.OdinLogManager;
+        if (!logManager) {
+          showToast('Log manager not available', 'error');
+          return;
+        }
+
+        if (confirm('Are you sure you want to clear all logs? This cannot be undone.')) {
+          const typeSelect = document.getElementById('odin-log-filter-type');
+          const type = typeSelect ? typeSelect.value : 'all';
+
+          logManager.clearLogs(type);
+          renderTabContent('settings');
+          showToast('Logs cleared', 'success');
+        }
       },
 
       showToast,
