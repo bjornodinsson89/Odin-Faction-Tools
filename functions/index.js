@@ -63,28 +63,40 @@ exports.authenticateWithTorn = onCall({
 
     const data = await response.json();
 
+    console.log('[Auth] Torn API response keys:', Object.keys(data));
+    console.log('[Auth] Has profile:', !!data.profile);
+    console.log('[Auth] Has faction:', !!data.faction);
+
     if (data.error) {
       console.error('[Auth] Torn API error:', data.error.code, data.error.error);
       throw new HttpsError('invalid-argument', `Torn API error: ${data.error.error}`);
     }
 
-    const profile = data.profile || data;
+    // Extract profile and faction objects from Torn API response
+    const profile = data.profile || {};
     const faction = data.faction || {};
 
-    const playerId = profile.player_id || data.player_id;
-    const playerName = profile.name || data.name;
-    const playerLevel = profile.level || data.level || 1;
-    const factionId = faction.faction_id || data.faction?.faction_id || null;
-    const factionName = faction.faction_name || data.faction?.faction_name || null;
+    console.log('[Auth] Profile keys:', Object.keys(profile));
+    console.log('[Auth] Faction keys:', Object.keys(faction));
+    console.log('[Auth] profile.id present:', !!profile.id);
+
+    // FIXED: Torn API returns profile.id (not player_id), faction.id (not faction_id)
+    const playerId = profile.id;
+    const playerName = profile.name;
+    const playerLevel = profile.level || 1;
+    const factionId = faction.id || null;
+    const factionName = faction.name || null;
 
     if (!playerId) {
       console.error('[Auth] No player ID in Torn API response');
+      console.error('[Auth] Profile object:', profile);
       throw new HttpsError('internal', 'Failed to get player ID from Torn API');
     }
 
     console.log(`[Auth] Validated player: ${playerName} (${playerId}) Level ${playerLevel}`);
 
     const userRef = admin.firestore().collection('users').doc(String(playerId));
+    console.log('[Auth] Writing to Firestore: users/' + String(playerId));
     await userRef.set({
       playerId: playerId,
       playerName: playerName,
@@ -95,9 +107,12 @@ exports.authenticateWithTorn = onCall({
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
     }, { merge: true });
 
-    console.log('[Auth] User document written');
+    console.log('[Auth] ✓ User document written to users/' + String(playerId));
 
     if (factionId) {
+      const factionPath = `factions/${factionId}/members/${playerId}`;
+      console.log('[Auth] Writing to Firestore: ' + factionPath);
+
       const factionMemberRef = admin.firestore()
         .collection('factions')
         .doc(String(factionId))
@@ -110,7 +125,7 @@ exports.authenticateWithTorn = onCall({
         lastSeen: admin.firestore.FieldValue.serverTimestamp()
       }, { merge: true });
 
-      console.log('[Auth] Faction member document written');
+      console.log('[Auth] ✓ Faction member document written to ' + factionPath);
     }
 
     const claims = {
@@ -189,27 +204,40 @@ exports.authenticateWithTornHttp = onRequest({
 
     const data = await response.json();
 
+    console.log('[Auth-HTTP] Torn API response keys:', Object.keys(data));
+    console.log('[Auth-HTTP] Has profile:', !!data.profile);
+    console.log('[Auth-HTTP] Has faction:', !!data.faction);
+
     if (data.error) {
       res.status(400).json({ success: false, error: `Torn API error: ${data.error.error}` });
       return;
     }
 
-    const profile = data.profile || data;
+    // Extract profile and faction objects from Torn API response
+    const profile = data.profile || {};
     const faction = data.faction || {};
 
-    const playerId = profile.player_id || data.player_id;
-    const playerName = profile.name || data.name;
-    const playerLevel = profile.level || data.level || 1;
-    const factionId = faction.faction_id || data.faction?.faction_id || null;
-    const factionName = faction.faction_name || data.faction?.faction_name || null;
+    console.log('[Auth-HTTP] Profile keys:', Object.keys(profile));
+    console.log('[Auth-HTTP] Faction keys:', Object.keys(faction));
+    console.log('[Auth-HTTP] profile.id present:', !!profile.id);
+
+    // FIXED: Torn API returns profile.id (not player_id), faction.id (not faction_id)
+    const playerId = profile.id;
+    const playerName = profile.name;
+    const playerLevel = profile.level || 1;
+    const factionId = faction.id || null;
+    const factionName = faction.name || null;
 
     if (!playerId) {
+      console.error('[Auth-HTTP] No player ID in Torn API response');
+      console.error('[Auth-HTTP] Profile object:', profile);
       throw new Error('Failed to get player ID from Torn API');
     }
 
-    console.log(`[Auth-HTTP] Validated: ${playerName} (${playerId})`);
+    console.log(`[Auth-HTTP] Validated: ${playerName} (${playerId}) Level ${playerLevel}`);
 
     const userRef = admin.firestore().collection('users').doc(String(playerId));
+    console.log('[Auth-HTTP] Writing to Firestore: users/' + String(playerId));
     await userRef.set({
       playerId: playerId,
       playerName: playerName,
@@ -220,9 +248,12 @@ exports.authenticateWithTornHttp = onRequest({
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
     }, { merge: true });
 
-    console.log('[Auth-HTTP] User document written');
+    console.log('[Auth-HTTP] ✓ User document written to users/' + String(playerId));
 
     if (factionId) {
+      const factionPath = `factions/${factionId}/members/${playerId}`;
+      console.log('[Auth-HTTP] Writing to Firestore: ' + factionPath);
+
       const factionMemberRef = admin.firestore()
         .collection('factions')
         .doc(String(factionId))
@@ -235,7 +266,7 @@ exports.authenticateWithTornHttp = onRequest({
         lastSeen: admin.firestore.FieldValue.serverTimestamp()
       }, { merge: true });
 
-      console.log('[Auth-HTTP] Faction member document written');
+      console.log('[Auth-HTTP] ✓ Faction member document written to ' + factionPath);
     }
 
     const claims = {
