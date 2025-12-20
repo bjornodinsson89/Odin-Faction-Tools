@@ -47,6 +47,10 @@
     const AUTH_REQUIRED_TABS = new Set(['warRoom', 'targets', 'chain', 'schedule', 'leadership', 'personal']);
 
     function isAuthReady() {
+      // Check if user enabled local mode
+      const localMode = storage && typeof storage.getJSON === 'function' ? storage.getJSON('odin_local_mode_v1') : false;
+      if (localMode) return true;
+
       return !!firebaseConnected && !!authUserPresent;
     }
 
@@ -109,8 +113,12 @@
               />
 
               <div class="odin-auth-actions">
-                <button class="odin-btn odin-btn-primary" id="odin-auth-btn" disabled>🔑 Authenticate</button>
+                <button class="odin-btn odin-btn-primary" id="odin-auth-btn" disabled>Authenticate</button>
                 <button class="odin-btn odin-btn-secondary" id="odin-auth-use-saved" disabled>Use Saved</button>
+              </div>
+
+              <div style="margin-top: 12px; text-align: center;">
+                <button class="odin-btn odin-btn-secondary" id="odin-auth-later" style="width: 100%;">Authenticate Later (Local Mode)</button>
               </div>
 
               <div id="odin-auth-msg" class="odin-auth-msg"></div>
@@ -124,9 +132,11 @@
       const input = document.getElementById('odin-auth-torn-key');
       const btn = document.getElementById('odin-auth-btn');
       const useSaved = document.getElementById('odin-auth-use-saved');
+      const authLater = document.getElementById('odin-auth-later');
       const ack = document.getElementById('odin-auth-ack');
 
       const ackKey = 'odin_auth_ack_v1';
+      const localModeKey = 'odin_local_mode_v1';
 
       function setMsg(t, kind) {
         if (!msg) return;
@@ -167,6 +177,18 @@
           const saved = getSavedTornKey();
           if (input) input.value = saved || '';
           setMsg(saved ? 'Loaded saved key into the field.' : 'No saved key found. Paste a key to continue.', saved ? 'success' : 'error');
+        };
+      }
+
+      if (authLater) {
+        authLater.onclick = () => {
+          if (storage && typeof storage.setJSON === 'function') {
+            storage.setJSON(localModeKey, true);
+          }
+          setMsg('Local mode enabled. Database features will be unavailable.', 'info');
+          setTimeout(() => {
+            renderTabContent(tabId);
+          }, 500);
         };
       }
 
@@ -229,11 +251,11 @@
       styles.id = 'odin-ui-styles';
 
       styles.textContent = `
-        /* Overlay/Backdrop (darker red tint) */
+        /* Overlay/Backdrop */
         #odin-overlay {
           position: fixed;
           inset: 0;
-          background: rgba(139, 0, 0, 0.25);
+          background: rgba(0, 0, 0, 0.5);
           z-index: 99997;
           display: none;
           backdrop-filter: blur(2px);
@@ -252,22 +274,22 @@
           height: 48px;
           border-radius: 50%;
           background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-          border: 2px solid #e94560;
+          border: 2px solid #8B0000;
           cursor: pointer;
           z-index: 99999;
           display: flex;
           align-items: center;
           justify-content: center;
           font-size: 0;
-          box-shadow: 0 4px 15px rgba(233, 69, 96, 0.4);
+          box-shadow: 0 4px 15px rgba(139, 0, 0, 0.4);
           transition: all 0.3s ease;
         }
         #odin-toggle-btn:hover {
           transform: scale(1.1);
-          box-shadow: 0 6px 20px rgba(233, 69, 96, 0.6);
+          box-shadow: 0 6px 20px rgba(139, 0, 0, 0.6);
         }
         #odin-toggle-btn.active {
-          background: linear-gradient(135deg, #e94560 0%, #c73e54 100%);
+          background: linear-gradient(135deg, #8B0000 0%, #6B0000 100%);
           z-index: 99996;
         }
 
@@ -277,10 +299,10 @@
           top: 60px;
           right: 20px;
           width: 440px;
-                    max-width: calc(100vw - 40px);
+          max-width: calc(100vw - 40px);
           max-height: calc(100vh - 100px);
           background: linear-gradient(180deg, #1a1a2e 0%, #0f0f1a 100%);
-          border: 1px solid #e94560;
+          border: 1px solid #8B0000;
           border-radius: 12px;
           z-index: 99998;
           display: none;
@@ -297,13 +319,13 @@
           justify-content: space-between;
           padding: 8px 12px;
           background: linear-gradient(90deg, #1a0a0a 0%, #2a0a0a 100%);
-          border-bottom: 1px solid rgba(233, 69, 96, 0.5);
+          border-bottom: 1px solid rgba(139, 0, 0, 0.5);
           border-radius: 11px 11px 0 0;
           cursor: move;
           user-select: none;
         }
         .odin-drag-bar-title {
-          color: #e94560;
+          color: #8B0000;
           font-size: 11px;
           font-weight: 600;
           letter-spacing: 0.5px;
@@ -317,13 +339,13 @@
           justify-content: center;
           cursor: pointer;
           border-radius: 4px;
-          color: #e94560;
+          color: #8B0000;
           font-size: 16px;
           font-weight: 700;
           transition: all 0.2s ease;
         }
         .odin-drag-bar-close:hover {
-          background: rgba(233, 69, 96, 0.2);
+          background: rgba(139, 0, 0, 0.2);
           transform: scale(1.1);
         }
 
@@ -334,7 +356,7 @@
           justify-content: space-between;
           padding: 12px 16px;
           background: linear-gradient(90deg, #16213e 0%, #1a1a2e 100%);
-          border-bottom: 1px solid #e94560;
+          border-bottom: 1px solid #8B0000;
         }
         .odin-header-title {
           display: flex;
@@ -367,7 +389,7 @@
           gap: 4px;
           padding: 8px;
           background: #16213e;
-          border-bottom: 1px solid rgba(233, 69, 96, 0.3);
+          border-bottom: 1px solid rgba(139, 0, 0, 0.3);
         }
         .odin-tab {
           flex: 0 0 auto;
@@ -383,11 +405,11 @@
           transition: all 0.2s ease;
           text-align: center;
         }
-        .odin-tab:hover { background: rgba(233, 69, 96, 0.1); color: #fff; }
+        .odin-tab:hover { background: rgba(139, 0, 0, 0.1); color: #fff; }
         .odin-tab.active {
-          background: linear-gradient(135deg, #e94560 0%, #c73e54 100%);
+          background: linear-gradient(135deg, #8B0000 0%, #6B0000 100%);
           color: #fff;
-          border-color: #e94560;
+          border-color: #8B0000;
         }
 
         /* Content Area */
@@ -400,7 +422,7 @@
         }
         .odin-content::-webkit-scrollbar { width: 6px; }
         .odin-content::-webkit-scrollbar-track { background: #1a1a2e; }
-        .odin-content::-webkit-scrollbar-thumb { background: #e94560; border-radius: 3px; }
+        .odin-content::-webkit-scrollbar-thumb { background: #8B0000; border-radius: 3px; }
 
         /* ============================
            AUTH TERMINAL SCREEN
@@ -436,18 +458,18 @@
           overflow-y: auto;
           position: relative;
 
-          border: 1px solid #e94560;
+          border: 1px solid #8B0000;
           border-radius: 12px;
 
           background: #05050a;
-          box-shadow: 0 0 10px rgba(233, 69, 96, 0.4);
+          box-shadow: 0 0 10px rgba(139, 0, 0, 0.4);
 
           padding: 12px;
 
           font-family: "Courier New", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
           letter-spacing: 0.2px;
           color: #eaeaea;
-          text-shadow: 0 0 6px rgba(233, 69, 96, 0.10);
+          text-shadow: 0 0 6px rgba(139, 0, 0, 0.10);
         }
 
         /* Scanlines + subtle vignette overlay */
@@ -457,11 +479,11 @@
           inset: 0;
           pointer-events: none;
           background:
-            radial-gradient(120% 90% at 50% 20%, rgba(233, 69, 96, 0.08), rgba(5, 5, 10, 0.0) 60%),
+            radial-gradient(120% 90% at 50% 20%, rgba(139, 0, 0, 0.08), rgba(5, 5, 10, 0.0) 60%),
             repeating-linear-gradient(
               to bottom,
-              rgba(233, 69, 96, 0.08) 0px,
-              rgba(233, 69, 96, 0.02) 1px,
+              rgba(139, 0, 0, 0.08) 0px,
+              rgba(139, 0, 0, 0.02) 1px,
               rgba(5, 5, 10, 0.00) 2px,
               rgba(5, 5, 10, 0.00) 4px
             );
@@ -471,7 +493,7 @@
 
         .odin-auth-scroll::-webkit-scrollbar { width: 6px; }
         .odin-auth-scroll::-webkit-scrollbar-track { background: rgba(5, 5, 10, 0.85); }
-        .odin-auth-scroll::-webkit-scrollbar-thumb { background: rgba(233, 69, 96, 0.85); border-radius: 3px; }
+        .odin-auth-scroll::-webkit-scrollbar-thumb { background: rgba(139, 0, 0, 0.85); border-radius: 3px; }
 
         .odin-auth-disclaimer-title {
           font-weight: 800;
@@ -491,8 +513,8 @@
           line-height: 1.35;
         }
         .odin-auth-disclaimer-body code {
-          background: rgba(233, 69, 96, 0.10);
-          border: 1px solid rgba(233, 69, 96, 0.25);
+          background: rgba(139, 0, 0, 0.10);
+          border: 1px solid rgba(139, 0, 0, 0.25);
           padding: 1px 6px;
           border-radius: 6px;
           font-size: 11px;
@@ -502,7 +524,7 @@
         .odin-auth-footer {
           flex: 0 0 auto;
           padding-top: 8px;
-          border-top: 1px solid rgba(233, 69, 96, 0.18);
+          border-top: 1px solid rgba(139, 0, 0, 0.18);
         }
 
         .odin-auth-ack {
@@ -534,7 +556,7 @@
         /* Common Components */
         .odin-card {
           background: rgba(22, 33, 62, 0.8);
-          border: 1px solid rgba(233, 69, 96, 0.2);
+          border: 1px solid rgba(139, 0, 0, 0.2);
           border-radius: 8px;
           padding: 12px;
           margin-bottom: 12px;
@@ -570,12 +592,12 @@
           transition: all 0.2s ease;
         }
         .odin-btn-primary {
-          background: linear-gradient(135deg, #e94560 0%, #c73e54 100%);
+          background: linear-gradient(135deg, #8B0000 0%, #6B0000 100%);
           color: #fff;
         }
         .odin-btn-primary:hover {
           transform: translateY(-1px);
-          box-shadow: 0 4px 12px rgba(233, 69, 96, 0.4);
+          box-shadow: 0 4px 12px rgba(139, 0, 0, 0.4);
         }
         .odin-btn-secondary {
           background: rgba(255, 255, 255, 0.1);
@@ -611,7 +633,7 @@
           font-size: 13px;
           box-sizing: border-box;
         }
-        .odin-input:focus { outline: none; border-color: #e94560; }
+        .odin-input:focus { outline: none; border-color: #8B0000; }
 
         .odin-checkbox-group {
           display: flex;
@@ -622,7 +644,7 @@
         .odin-checkbox-group input[type="checkbox"] {
           width: 16px;
           height: 16px;
-          accent-color: #e94560;
+          accent-color: #8B0000;
         }
         .odin-checkbox-group label { color: #e0e0e0; font-size: 13px; }
 
@@ -649,7 +671,7 @@
           background: rgba(0, 0, 0, 0.2);
           border-radius: 8px;
         }
-        .odin-stat-value { font-size: 24px; font-weight: 700; color: #e94560; }
+        .odin-stat-value { font-size: 24px; font-weight: 700; color: #8B0000; }
         .odin-stat-label { font-size: 11px; color: #a0a0a0; margin-top: 4px; }
 
         /* Target List */
@@ -771,7 +793,7 @@
 
       panelElement.innerHTML = `
         <div class="odin-drag-bar" id="odin-drag-bar">
-          <div class="odin-drag-bar-title">⚡ Drag to Move</div>
+          <div class="odin-drag-bar-title">Odin Faction Tools</div>
           <div class="odin-drag-bar-close" id="odin-close-btn" title="Close">✕</div>
         </div>
 
@@ -1199,11 +1221,36 @@
       const tornKeyExists = !!(ctx.api?.getTornApiKey?.() && String(ctx.api.getTornApiKey()).length > 8);
       const tornStatsKeyExists = !!(ctx.api?.hasTornStatsKey?.());
       const ffScouterKeyExists = !!(ctx.api?.hasFFScouterKey?.());
+      const localMode = storage && typeof storage.getJSON === 'function' ? storage.getJSON('odin_local_mode_v1') : false;
+      const isAuthenticated = !!authUserPresent;
 
       return `
+        ${localMode ? `
         <div class="odin-card">
           <div class="odin-card-header">
-            <div class="odin-card-title">🔑 API Keys</div>
+            <div class="odin-card-title">Database Authentication</div>
+          </div>
+          <div style="margin-bottom: 12px; color: #f59e0b;">
+            ⚠️ You are currently in Local Mode. Database features are unavailable.
+          </div>
+          <button class="odin-btn odin-btn-primary" onclick="window.OdinUI.authenticateWithDatabase()" style="width: 100%;">
+            Authenticate with Database
+          </button>
+        </div>
+        ` : (isAuthenticated ? `
+        <div class="odin-card">
+          <div class="odin-card-header">
+            <div class="odin-card-title">Database Authentication</div>
+          </div>
+          <div style="color: #22c55e;">
+            ✓ Authenticated with database
+          </div>
+        </div>
+        ` : '')}
+
+        <div class="odin-card">
+          <div class="odin-card-header">
+            <div class="odin-card-title">API Keys</div>
           </div>
 
           <div class="odin-form-group">
@@ -1626,6 +1673,18 @@
         ctx.saveSettings(settings);
         nexus.emit?.('SAVE_PREFERENCES', prefs);
         showToast('Preferences saved!', 'success');
+      },
+
+      authenticateWithDatabase: () => {
+        // Clear local mode flag
+        if (storage && typeof storage.setJSON === 'function') {
+          storage.setJSON('odin_local_mode_v1', false);
+        }
+        showToast('Switching to database authentication...', 'info');
+        // Switch to War Room tab to trigger auth gate
+        setTimeout(() => {
+          switchTab('warRoom');
+        }, 500);
       },
 
       showToast,
