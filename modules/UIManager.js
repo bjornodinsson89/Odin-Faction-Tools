@@ -28,8 +28,8 @@
     // ============================================
     // AUTH / CONNECTION STATE
     // ============================================
-    let firebaseConnected = !!ctx.firebase?.isConnected?.();
-    let authUserPresent = !!(ctx.firebase?.getCurrentUser?.() || ctx.firebase?.auth?.()?.currentUser);
+    let firebaseConnected = !!store.get('firebase.connected');
+    let authUserPresent = !!store.get('auth.uid');
 
     const tabs = {
       warRoom: { label: '⚔️ War Room', component: null },
@@ -55,7 +55,7 @@
     }
 
     function getSavedTornKey() {
-      try { return (ctx.api && typeof ctx.api.getTornApiKey === 'function') ? (ctx.api.getTornApiKey() || '') : ''; } catch (_) { return ''; }
+      try { return String(store.get('api.tornKey') || '').trim(); } catch (_) { return ''; }
     }
 
     function renderAuthGate(tabId) {
@@ -209,25 +209,36 @@
             }
 
             // Save for future Torn API calls (single entry flow)
-            try {
-              if (ctx.api && typeof ctx.api.setTornApiKey === 'function') {
-                ctx.api.setTornApiKey(key, { persist: true, silent: true });
-              }
-            } catch (_) {}
+          nexus.emit('SET_API_KEYS', { tornKey: key });
 
-            if (!ctx.firebase || typeof ctx.firebase.authenticateWithTorn !== 'function') {
-              setMsg('Firebase service is not ready yet. Try again in a moment.', 'error');
-              return;
-            }
+          // Backend auth is required for faction-wide features, but script should still run offline.
+          if (!store.get('firebase.connected')) {
+            setMsg('⚠️ Backend not reachable right now (offline mode). Auth may fail until it reconnects.', 'warn');
+          }
 
-            await ctx.firebase.authenticateWithTorn(key);
+          // Authenticate with backend via Nexus event (FirebaseService handles it)
+          await new Promise((resolve, reject) => {
+            let done = false;
+            const offOk = nexus.once('AUTH_WITH_TORN_SUCCESS', () => {
+              if (done) return;
+              done = true;
+              try { offFail(); } catch (_) {}
+              resolve(true);
+            });
+            const offFail = nexus.once('AUTH_WITH_TORN_FAILURE', (p) => {
+              if (done) return;
+              done = true;
+              try { offOk(); } catch (_) {}
+              reject(new Error((p && p.error) ? p.error : 'Authentication failed'));
+            });
+            nexus.emit('AUTH_WITH_TORN', { apiKey: key });
+          });
 
-            // Get authenticated user info
-            const currentUser = ctx.firebase.getCurrentUser && ctx.firebase.getCurrentUser();
-            authUserPresent = !!currentUser;
+// Get authenticated user info
+            const userId = store.get('auth.uid') || 'Unknown';
+            authUserPresent = !!store.get('auth.uid');
 
             // Show success message with user details
-            const userId = currentUser?.uid || 'Unknown';
             setMsg('✓ Authentication successful! User ID: ' + userId + ' - Loading...', 'success');
 
             // Wait a moment to show success message
@@ -848,7 +859,36 @@
       document.body.appendChild(toggleButton);
     }
 
-    function createPanel() {
+    
+  function handleOdinActionClick(e) {
+    const el = e.target && e.target.closest ? e.target.closest('[data-odin-action]') : null;
+    if (!el) return;
+    // Allow normal navigation for anchors unless explicitly an action-only element
+    if (el.tagName === 'A' && el.hasAttribute('href')) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    const action = el.getAttribute('data-odin-action');
+    const arg = el.getAttribute('data-odin-arg');
+    if (!window.OdinUI || typeof window.OdinUI[action] !== 'function') {
+      try { console.warn('[OdinUI] Unknown action:', action); } catch (_) {}
+      return;
+    }
+
+    try {
+      if (arg !== null) {
+        // If numeric, pass number; else pass string
+        const n = Number(arg);
+        window.OdinUI[action](Number.isFinite(n) && String(n) === String(arg) ? n : arg);
+      } else {
+        window.OdinUI[action]();
+      }
+    } catch (err) {
+      try { console.error('[OdinUI] Action error:', action, err); } catch (_) {}
+    }
+  }
+
+function createPanel() {
       // Create overlay/backdrop
       const overlay = document.createElement('div');
       overlay.id = 'odin-overlay';
@@ -891,6 +931,10 @@
           <!-- Content injected dynamically -->
         </div>
       `;
+
+    // CSP-safe button handling (no inline onclick)
+    panelElement.addEventListener('click', handleOdinActionClick, true);
+
 
       // Tab click handlers
       panelElement.querySelectorAll('.odin-tab').forEach(tab => {
@@ -1044,13 +1088,13 @@ const onlineMembers = Object.values(presence).filter(p => p.status === 'online')
             <div class="odin-card-title">⚡ Quick Actions</div>
           </div>
           <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-            <button class="odin-btn odin-btn-primary" onclick="window.OdinUI.refreshClaims()">
+            <button class="odin-btn odin-btn-primary" data-odin-action="refreshClaims">
               🔄 Refresh
             </button>
-            <button class="odin-btn odin-btn-secondary" onclick="window.OdinUI.scoreAllTargets()">
+            <button class="odin-btn odin-btn-secondary" data-odin-action="scoreAllTargets">
               🎯 Score Targets
             </button>
-            <button class="odin-btn odin-btn-secondary" onclick="window.OdinUI.startWatching()">
+            <button class="odin-btn odin-btn-secondary" data-odin-action="startWatching">
               👁️ Watch Mode
             </button>
           </div>
@@ -1080,7 +1124,7 @@ const onlineMembers = Object.values(presence).filter(p => p.status === 'online')
           <div style="display: flex; gap: 8px;">
             <input type="text" id="odin-add-target-input" class="odin-input"
                     placeholder="Player ID or profile URL" style="flex: 1;">
-            <button class="odin-btn odin-btn-primary" onclick="window.OdinUI.addTarget()">
+            <button class="odin-btn odin-btn-primary" data-odin-action="addTarget">
               Add
             </button>
           </div>
@@ -1114,10 +1158,10 @@ const onlineMembers = Object.values(presence).filter(p => p.status === 'online')
             <span style="color: #6b7280;"> / ${chain.max || 0}</span>
           </div>
           <div style="display: flex; justify-content: center; gap: 8px;">
-            <button class="odin-btn odin-btn-danger" onclick="window.OdinUI.alertChain()">
+            <button class="odin-btn odin-btn-danger" data-odin-action="alertChain">
               🚨 Alert
             </button>
-            <button class="odin-btn odin-btn-secondary" onclick="window.OdinUI.refreshClaims()">
+            <button class="odin-btn odin-btn-secondary" data-odin-action="refreshClaims">
               🔄 Refresh
             </button>
           </div>
@@ -1183,7 +1227,7 @@ const onlineMembers = Object.values(presence).filter(p => p.status === 'online')
             </select>
           </div>
 
-          <button class="odin-btn odin-btn-primary" onclick="window.OdinUI.signUpForSlot()">
+          <button class="odin-btn odin-btn-primary" data-odin-action="signUpForSlot">
             Sign Up
           </button>
         </div>
@@ -1242,10 +1286,10 @@ const onlineMembers = Object.values(presence).filter(p => p.status === 'online')
             <div class="odin-card-title">📊 Bulk Operations</div>
           </div>
           <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-            <button class="odin-btn odin-btn-secondary" onclick="window.OdinUI.exportData()">
+            <button class="odin-btn odin-btn-secondary" data-odin-action="exportData">
               📤 Export Data
             </button>
-            <button class="odin-btn odin-btn-secondary" onclick="window.OdinUI.clearExpired()">
+            <button class="odin-btn odin-btn-secondary" data-odin-action="clearExpired">
               🧹 Clear Expired
             </button>
           </div>
@@ -1286,7 +1330,7 @@ const onlineMembers = Object.values(presence).filter(p => p.status === 'online')
             <div>Cache Size: ${frekiInfo.cacheSize || 0}</div>
           </div>
           <button class="odin-btn odin-btn-secondary odin-btn-small"
-                  onclick="window.OdinUI.getRecommendations()" style="margin-top: 8px;">
+                  data-odin-action="getRecommendations" style="margin-top: 8px;">
             🎲 Get Recommendations
           </button>
         </div>
@@ -1347,10 +1391,10 @@ const onlineMembers = Object.values(presence).filter(p => p.status === 'online')
             <input type="text" id="odin-log-search" class="odin-input" placeholder="Search logs...">
           </div>
           <div style="display: flex; gap: 8px; margin-top: 10px;">
-            <button class="odin-btn odin-btn-secondary" onclick="window.OdinUI.filterLogs()">
+            <button class="odin-btn odin-btn-secondary" data-odin-action="filterLogs">
               🔍 Filter
             </button>
-            <button class="odin-btn odin-btn-secondary" onclick="window.OdinUI.refreshLogs()">
+            <button class="odin-btn odin-btn-secondary" data-odin-action="refreshLogs">
               🔄 Refresh
             </button>
           </div>
@@ -1360,13 +1404,13 @@ const onlineMembers = Object.values(presence).filter(p => p.status === 'online')
           <div class="odin-card-header">
             <div class="odin-card-title">📋 Log Console</div>
             <div style="display: flex; gap: 6px;">
-              <button class="odin-btn odin-btn-small odin-btn-secondary" onclick="window.OdinUI.copyLogs()">
+              <button class="odin-btn odin-btn-small odin-btn-secondary" data-odin-action="copyLogs">
                 📋 Copy
               </button>
-              <button class="odin-btn odin-btn-small odin-btn-primary" onclick="window.OdinUI.sendLogsToBjorn()">
+              <button class="odin-btn odin-btn-small odin-btn-primary" data-odin-action="sendLogsToBjorn">
                 📧 Send to Bjorn
               </button>
-              <button class="odin-btn odin-btn-small odin-btn-danger" onclick="window.OdinUI.clearLogs()">
+              <button class="odin-btn odin-btn-small odin-btn-danger" data-odin-action="clearLogs">
                 🗑️ Clear
               </button>
             </div>
@@ -1427,9 +1471,9 @@ const onlineMembers = Object.values(presence).filter(p => p.status === 'online')
 
     function renderSettingsTab() {
       const settings = ctx.settings || {};
-      const tornKeyExists = !!(ctx.api?.getTornApiKey?.() && String(ctx.api.getTornApiKey()).length > 8);
-      const tornStatsKeyExists = !!(ctx.api?.hasTornStatsKey?.());
-      const ffScouterKeyExists = !!(ctx.api?.hasFFScouterKey?.());
+      const tornKeyExists = !!(store.get('api.tornKey') && String(store.get('api.tornKey')).length > 8);
+      const tornStatsKeyExists = !!(store.get('api.tornStatsKey') && String(store.get('api.tornStatsKey')).length > 8);
+      const ffScouterKeyExists = !!(store.get('api.ffScouterKey') && String(store.get('api.ffScouterKey')).length > 8);
       const localMode = storage && typeof storage.getJSON === 'function' ? storage.getJSON('odin_local_mode_v1') : false;
       const isAuthenticated = !!authUserPresent;
 
@@ -1442,7 +1486,7 @@ const onlineMembers = Object.values(presence).filter(p => p.status === 'online')
           <div style="margin-bottom: 12px; color: #f59e0b;">
             ⚠️ You are currently in Local Mode. Database features are unavailable.
           </div>
-          <button class="odin-btn odin-btn-primary" onclick="window.OdinUI.authenticateWithDatabase()" style="width: 100%;">
+          <button class="odin-btn odin-btn-primary" data-odin-action="authenticateWithDatabase" style="width: 100%;">
             Authenticate with Database
           </button>
         </div>
@@ -1492,7 +1536,7 @@ const onlineMembers = Object.values(presence).filter(p => p.status === 'online')
                    data-has-key="${ffScouterKeyExists}">
           </div>
 
-          <button class="odin-btn odin-btn-primary" onclick="window.OdinUI.saveApiKeys()">
+          <button class="odin-btn odin-btn-primary" data-odin-action="saveApiKeys">
             💾 Save API Keys
           </button>
         </div>
@@ -1526,7 +1570,7 @@ const onlineMembers = Object.values(presence).filter(p => p.status === 'online')
             </select>
           </div>
 
-          <button class="odin-btn odin-btn-secondary" onclick="window.OdinUI.savePreferences()">
+          <button class="odin-btn odin-btn-secondary" data-odin-action="savePreferences">
             💾 Save Preferences
           </button>
         </div>
@@ -1644,8 +1688,8 @@ const onlineMembers = Object.values(presence).filter(p => p.status === 'online')
         const attackUrl = `https://www.torn.com/loader.php?sid=attack&user2=${encodeURIComponent(targetId)}`;
 
         const claimBtn = isClaimed
-            ? `<button class="odin-btn odin-btn-sm ${isMine ? 'odin-btn-secondary' : 'odin-btn-warning'}" onclick="OdinUI.releaseClaim('${targetId}')">${isMine ? 'Release' : 'Release'}</button>`
-            : `<button class="odin-btn odin-btn-sm odin-btn-success" onclick="OdinUI.claimTarget('${targetId}')">Claim</button>`;
+            ? `<button class="odin-btn odin-btn-sm ${isMine ? 'odin-btn-secondary' : 'odin-btn-warning'}" data-odin-action="releaseClaim" data-odin-arg="${targetId}">${isMine ? 'Release' : 'Release'}</button>`
+            : `<button class="odin-btn odin-btn-sm odin-btn-success" data-odin-action="claimTarget" data-odin-arg="${targetId}">Claim</button>`;
 
         return `
             <div class="odin-target-item ${isClaimed ? 'claimed' : ''}">
@@ -1665,7 +1709,7 @@ const onlineMembers = Object.values(presence).filter(p => p.status === 'online')
                 <div class="odin-target-actions">
                     <a class="odin-btn odin-btn-sm odin-btn-primary" href="${attackUrl}">Attack</a>
                     ${claimBtn}
-                    <button class="odin-btn odin-btn-sm odin-btn-danger" onclick="OdinUI.removeTarget('${targetId}')">×</button>
+                    <button class="odin-btn odin-btn-sm odin-btn-danger" data-odin-action="removeTarget" data-odin-arg="${targetId}">×</button>
                 </div>
             </div>
         `;
@@ -1685,7 +1729,7 @@ const onlineMembers = Object.values(presence).filter(p => p.status === 'online')
 
         html += `
           <div class="odin-schedule-slot ${filledSlots > 0 ? 'filled' : 'empty'} ${isMine ? 'mine' : ''}"
-               onclick="window.OdinUI.viewDaySchedule(${day})"
+               data-odin-action="viewDaySchedule" data-odin-arg="${day}"
                title="${days[day]}: ${filledSlots} slots filled">
             <div style="font-weight: 600;">${days[day]}</div>
             <div style="font-size: 8px;">${filledSlots}/24</div>
@@ -1755,7 +1799,7 @@ const onlineMembers = Object.values(presence).filter(p => p.status === 'online')
             ${escapeHtml(fav.name || id)}
           </a>
           <button class="odin-btn odin-btn-small odin-btn-danger"
-                  onclick="window.OdinUI.removeFavorite('${id}')">✕</button>
+                  data-odin-action="removeFavorite" data-odin-arg="${id}">✕</button>
         </div>
       `).join('');
     }
@@ -1901,28 +1945,18 @@ const onlineMembers = Object.values(presence).filter(p => p.status === 'online')
       // FIXED: Only save keys that were actually changed
       saveApiKeys: () => {
         const tornKeyInput = document.getElementById('odin-torn-api-key');
-        const tornStatsKeyInput = document.getElementById('odin-tornstats-key');
-        const ffScouterKeyInput = document.getElementById('odin-ffscouter-key');
+        const tornStatsKeyInput = document.getElementById('odin-tornstats-api-key');
+        const ffScouterKeyInput = document.getElementById('odin-ffscouter-api-key');
 
-        const tornKey = tornKeyInput?.value?.trim();
-        const tornStatsKey = tornStatsKeyInput?.value?.trim();
-        const ffScouterKey = ffScouterKeyInput?.value?.trim();
+        const tornKey = tornKeyInput ? String(tornKeyInput.value || '').trim() : '';
+        const tornStatsKey = tornStatsKeyInput ? String(tornStatsKeyInput.value || '').trim() : '';
+        const ffScouterKey = ffScouterKeyInput ? String(ffScouterKeyInput.value || '').trim() : '';
 
-        try {
-          if (tornKey && tornKey.length > 8) ctx.api?.setTornApiKey?.(tornKey, { persist: true, silent: true });
-          if (tornStatsKey && tornStatsKey.length > 8) ctx.api?.setTornStatsApiKey?.(tornStatsKey, { persist: true, silent: true });
-          if (ffScouterKey && ffScouterKey.length > 8) ctx.api?.setFFScouterApiKey?.(ffScouterKey, { persist: true, silent: true });
+        nexus.emit('SET_API_KEYS', { tornKey, tornStatsKey, ffScouterKey });
 
-          if (tornKeyInput) tornKeyInput.value = '';
-          if (tornStatsKeyInput) tornStatsKeyInput.value = '';
-          if (ffScouterKeyInput) ffScouterKeyInput.value = '';
+        showToast('✅ API keys saved');
+        renderTabContent();
 
-          apiKeysDirty = { torn: false, tornStats: false, ffScouter: false };
-          showToast('API keys saved locally!', 'success');
-          renderTabContent('settings');
-        } catch (e) {
-          showToast('Failed to save API keys: ' + (e && e.message ? e.message : String(e)), 'error');
-        }
       },
 
       savePreferences: () => {
