@@ -239,15 +239,11 @@
               experimentalForceLongPolling: true,
 
               // Ignore undefined properties to prevent write errors
-              ignoreUndefinedProperties: true,
-
-              // Merge behavior for set operations
-              merge: true
+              ignoreUndefinedProperties: true
             });
             log('[Firebase] ✓ Firestore settings applied successfully');
             log('[Firebase]   - Long-polling transport: ENABLED (userscript-safe)');
             log('[Firebase]   - Ignore undefined properties: ENABLED');
-            log('[Firebase]   - Merge mode: ENABLED');
           } catch (settingsErr) {
             // Settings can only be applied once. If they fail, Firestore may already be initialized.
             log('[Firebase] WARNING: Could not apply Firestore settings:', settingsErr.message);
