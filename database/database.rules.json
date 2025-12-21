@@ -1,4 +1,5 @@
 {
+  "version": "5.1.0",
   "rules": {
     ".read": false,
     ".write": false,
@@ -8,8 +9,8 @@
         ".write": false,
         "roles": {
           "$uid": {
-            ".read": "auth != null && auth.token.factionId === $factionId && auth.uid === $uid",
-            ".write": "auth != null && auth.token.factionId === $factionId && (root.child('factions/'+$factionId+'/roles/'+auth.uid).val() === 'Developer' || root.child('factions/'+$factionId+'/roles/'+auth.uid).val() === 'Leader')",
+            ".read": "auth != null && auth.token.factionId === $factionId",
+            ".write": false,
             ".validate": "newData.isString() && (newData.val() === 'Developer' || newData.val() === 'Leader' || newData.val() === 'Admin' || newData.val() === 'Member')"
           }
         },

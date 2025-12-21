@@ -1,9 +1,13 @@
 /* ============================================================
-   UI Profile Injection v5.0.0
+   UI Profile Injection v5.1.0 - PURE PRESENTATION LAYER
    - Handles Torn AJAX navigation via history hooks + MutationObserver
+   - PURE UI: Only DOM scanning and button rendering
+   - NO API CALLS: Emits events for ActionHandler to orchestrate
    - Emits:
-       URL_CHANGED
-       PROFILE_VIEW_READY
+       URL_CHANGED - When URL changes
+       PROFILE_VIEW_READY - When profile page detected (ActionHandler fetches data)
+       CLAIM_TARGET - When user clicks Claim button
+       ADD_TARGET - When user clicks Add Target button
    ============================================================ */
 (function () {
   'use strict';
