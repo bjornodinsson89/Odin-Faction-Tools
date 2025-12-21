@@ -1,11 +1,15 @@
 /**
  * Odin Tools - Action Handler Module
- * Handles user actions like adding targets and claiming targets
- * Version: 1.0.0
+ * Handles user actions like adding targets, claiming targets, notes, etc.
+ * OFFLINE-TOLERANT:
+ *  - Always updates local storage immediately
+ *  - Mirrors storage state into ctx.store so UI updates instantly
+ *  - Emits Nexus events for other modules
+ * Version: 1.1.0
  * Author: BjornOdinsson89
  */
 
-(function() {
+(function () {
   'use strict';
 
   if (!window.OdinModules) window.OdinModules = [];
@@ -15,120 +19,103 @@
     const nexus = ctx.nexus || { emit: () => {}, on: () => () => {} };
     const log = ctx.log || console.log;
     const storage = ctx.storage || { getJSON: () => null, setJSON: () => {} };
-const storage = ctx.storage || { getJSON: () => null, setJSON: () => {} };
+    const store = ctx.store || { set: () => {}, get: () => {} };
 
-    const store = ctx.store || null;
+    const ACTION_VERSION = '1.1.0';
 
-    function syncTargetsToStore(targetsObj) {
-      if (!store || typeof store.set !== 'function' || typeof store.get !== 'function') return;
-      // Store shape expected by UIManager: state.targets is an object map
-      store.set('targets', targetsObj || {});
-    }
-
-    function syncClaimsToStore(claimsObj) {
-      if (!store || typeof store.set !== 'function' || typeof store.get !== 'function') return;
-      store.set('claims', claimsObj || {});
-    }
-
-    function loadTargetsFromStorageToStore() {
-      try {
-        const targets = storage.getJSON('odin_targets', {});
-        syncTargetsToStore(targets || {});
-      } catch (_) {}
-    }
-
-    function loadClaimsFromStorageToStore() {
-      try {
-        const claims = storage.getJSON('odin_claims', {});
-        syncClaimsToStore(claims || {});
-      } catch (_) {}
-    }
-
-    \1
     // ============================================
-    // INITIAL STATE SYNC (Storage -> Store)
+    // LOCAL <-> STORE SYNC
     // ============================================
-    loadTargetsFromStorageToStore();
-    loadClaimsFromStorageToStore();
+    function loadTargets() {
+      return storage.getJSON('odin_targets', {}) || {};
+    }
+
+    function saveTargets(targets) {
+      storage.setJSON('odin_targets', targets || {});
+      store.set('targets', targets || {});
+    }
+
+    function loadClaims() {
+      return storage.getJSON('odin_claims', {}) || {};
+    }
+
+    function saveClaims(claims) {
+      storage.setJSON('odin_claims', claims || {});
+      store.set('claims', claims || {});
+    }
+
+    function bootstrapStateFromStorage() {
+      try {
+        const targets = loadTargets();
+        const claims = loadClaims();
+        store.set('targets', targets);
+        store.set('claims', claims);
+      } catch (e) {
+        log('[ActionHandler] bootstrapStateFromStorage failed:', e && e.message ? e.message : e);
+      }
+    }
+
+    bootstrapStateFromStorage();
 
     // ============================================
     // ADD TARGET HANDLER
     // ============================================
     async function handleAddTarget(payload) {
       const { targetId } = payload || {};
-
-      if (!targetId) {
-        log('[ActionHandler] No targetId provided');
-        return;
-      }
+      if (!targetId) return;
 
       log('[ActionHandler] Adding target:', targetId);
 
       try {
-        // Get current targets from local storage
-        const targets = storage.getJSON('odin_targets', {});
+        const targets = loadTargets();
 
-        // Check if target already exists
         if (targets[targetId]) {
           log('[ActionHandler] Target already exists:', targetId);
           nexus.emit('TARGET_ALREADY_EXISTS', { targetId });
           return;
         }
 
-        // Add target with basic info
         targets[targetId] = {
           id: targetId,
           addedAt: Date.now(),
-          addedBy: ctx.store?.get('auth.tornId', null),
-          frekiScore: null,
+          addedBy: ctx?.firebase?.getCurrentUser?.()?.uid || null,
           targetName: null,
           level: null,
-          factionName: null
+          factionName: null,
+          lastUpdated: Date.now()
         };
 
-        // Save to local storage
-        \1
-        syncTargetsToStore(targets);
+        saveTargets(targets);
 
-        // Emit success event
         nexus.emit('TARGET_ADDED', { targetId, target: targets[targetId] });
 
-        log('[ActionHandler] Target added successfully:', targetId);
-
-        // Try to fetch target info from API if available
-        if (ctx.api && ctx.api.getUserProfile) {
+        // Fetch profile (best-effort)
+        if (ctx.api && typeof ctx.api.getUserProfile === 'function') {
           try {
             const profile = await ctx.api.getUserProfile(targetId);
             if (profile) {
               targets[targetId].targetName = profile.name || null;
               targets[targetId].level = profile.level || null;
-              targets[targetId].factionName = profile.faction?.faction_name || null;
-              \1
-              syncTargetsToStore(targets);
 
+              // Torn V1 user profile can include faction object in some shapes
+              const factionName =
+                (profile.faction && (profile.faction.faction_name || profile.faction.name)) ||
+                profile.faction_name ||
+                null;
+
+              targets[targetId].factionName = factionName;
+              targets[targetId].lastUpdated = Date.now();
+
+              saveTargets(targets);
               nexus.emit('TARGET_INFO_UPDATED', { targetId, target: targets[targetId] });
             }
           } catch (e) {
-            log('[ActionHandler] Failed to fetch target profile:', e.message);
+            log('[ActionHandler] Failed to fetch target profile (non-fatal):', e && e.message ? e.message : e);
           }
         }
-
-        // If Firebase is available, sync to database
-        if (ctx.firebase && ctx.firebase.ref) {
-          const factionId = ctx.store?.get('auth.factionId', null);
-          if (factionId) {
-            try {
-              await ctx.firebase.ref(`factions/${factionId}/targets/${targetId}`).set(targets[targetId]);
-              log('[ActionHandler] Target synced to Firebase');
-            } catch (e) {
-              log('[ActionHandler] Failed to sync target to Firebase:', e.message);
-            }
-          }
-        }
-
-      } catch (error) {
-        log('[ActionHandler] Error adding target:', error.message);
-        nexus.emit('TARGET_ADD_ERROR', { targetId, error: error.message });
+      } catch (e) {
+        log('[ActionHandler] Error adding target:', e && e.message ? e.message : e);
+        nexus.emit('TARGET_ADD_FAILED', { targetId, error: e && e.message ? e.message : String(e) });
       }
     }
 
@@ -136,199 +123,120 @@ const storage = ctx.storage || { getJSON: () => null, setJSON: () => {} };
     // CLAIM TARGET HANDLER
     // ============================================
     async function handleClaimTarget(payload) {
-      const { targetId, type } = payload || {};
-
-      if (!targetId) {
-        log('[ActionHandler] No targetId provided for claim');
-        return;
-      }
-
-      const claimType = type || 'attack';
-      log('[ActionHandler] Claiming target:', targetId, 'type:', claimType);
+      const { targetId } = payload || {};
+      if (!targetId) return;
 
       try {
-        // Get current claims from local storage
-        const claims = storage.getJSON('odin_claims', {});
+        const claims = loadClaims();
+        const uid = ctx?.firebase?.getCurrentUser?.()?.uid || 'local';
 
-        // Check if target is already claimed
-        if (claims[targetId] && claims[targetId].status === 'active') {
-          const existingClaim = claims[targetId];
-          const claimedBy = existingClaim.claimedBy || 'Unknown';
-          const isMyId = claimedBy === ctx.store?.get('auth.tornId', null);
-
-          if (isMyId) {
-            log('[ActionHandler] You already claimed this target');
-            nexus.emit('CLAIM_ALREADY_EXISTS', { targetId, isOwnClaim: true });
-          } else {
-            log('[ActionHandler] Target already claimed by:', claimedBy);
-            nexus.emit('CLAIM_ALREADY_EXISTS', { targetId, claimedBy, isOwnClaim: false });
-          }
-          return;
-        }
-
-        // Create claim
-        const claim = {
-          targetId: targetId,
-          claimedBy: ctx.store?.get('auth.tornId', null),
-          claimedByName: ctx.store?.get('auth.playerName', 'Unknown'),
+        claims[targetId] = {
+          targetId,
+          claimedBy: uid,
           claimedAt: Date.now(),
-          type: claimType,
-          status: 'active',
-          expiresAt: Date.now() + (15 * 60 * 1000) // 15 minutes expiry
+          status: 'claimed'
         };
 
-        claims[targetId] = claim;
+        saveClaims(claims);
 
-        // Save to local storage
-        \1
-        syncClaimsToStore(claims);
+        nexus.emit('TARGET_CLAIMED', { targetId, claim: claims[targetId] });
 
-        // Emit success event
-        nexus.emit('TARGET_CLAIMED', { targetId, claim });
-
-        log('[ActionHandler] Target claimed successfully:', targetId);
-
-        // If Firebase is available, sync to database
-        if (ctx.firebase && ctx.firebase.ref) {
-          const factionId = ctx.store?.get('auth.factionId', null);
-          if (factionId) {
-            try {
-              await ctx.firebase.ref(`factions/${factionId}/claims/${targetId}`).set(claim);
-              log('[ActionHandler] Claim synced to Firebase');
-            } catch (e) {
-              log('[ActionHandler] Failed to sync claim to Firebase:', e.message);
-            }
+        // Best-effort backend sync if available
+        if (ctx.firebase && typeof ctx.firebase.setDoc === 'function') {
+          try {
+            await ctx.firebase.setDoc('claims', String(targetId), claims[targetId], { merge: true });
+          } catch (e) {
+            // Non-fatal: queue handled in FirebaseService
           }
         }
-
-      } catch (error) {
-        log('[ActionHandler] Error claiming target:', error.message);
-        nexus.emit('CLAIM_ERROR', { targetId, error: error.message });
+      } catch (e) {
+        log('[ActionHandler] Claim error:', e && e.message ? e.message : e);
+        nexus.emit('TARGET_CLAIM_FAILED', { targetId, error: e && e.message ? e.message : String(e) });
       }
     }
 
     // ============================================
-    // RELEASE CLAIM HANDLER
+    // UNCLAIM TARGET HANDLER
     // ============================================
-    async function handleReleaseClaim(payload) {
+    async function handleUnclaimTarget(payload) {
       const { targetId } = payload || {};
-
-      if (!targetId) {
-        log('[ActionHandler] No targetId provided for release');
-        return;
-      }
-
-      log('[ActionHandler] Releasing claim:', targetId);
+      if (!targetId) return;
 
       try {
-        const claims = storage.getJSON('odin_claims', {});
+        const claims = loadClaims();
+        if (claims[targetId]) delete claims[targetId];
+        saveClaims(claims);
 
-        if (!claims[targetId]) {
-          log('[ActionHandler] No active claim found for target:', targetId);
-          return;
-        }
+        nexus.emit('TARGET_UNCLAIMED', { targetId });
 
-        // Mark as released
-        claims[targetId].status = 'released';
-        claims[targetId].releasedAt = Date.now();
-
-        \1
-        syncClaimsToStore(claims);
-
-        nexus.emit('CLAIM_RELEASED', { targetId });
-
-        log('[ActionHandler] Claim released successfully:', targetId);
-
-        // If Firebase is available, update database
-        if (ctx.firebase && ctx.firebase.ref) {
-          const factionId = ctx.store?.get('auth.factionId', null);
-          if (factionId) {
-            try {
-              await ctx.firebase.ref(`factions/${factionId}/claims/${targetId}`).set(claims[targetId]);
-              log('[ActionHandler] Claim release synced to Firebase');
-            } catch (e) {
-              log('[ActionHandler] Failed to sync claim release to Firebase:', e.message);
-            }
+        if (ctx.firebase && typeof ctx.firebase.deleteDoc === 'function') {
+          try {
+            await ctx.firebase.deleteDoc('claims', String(targetId));
+          } catch (e) {
+            // queued/non-fatal
           }
         }
-
-      } catch (error) {
-        log('[ActionHandler] Error releasing claim:', error.message);
-        nexus.emit('CLAIM_RELEASE_ERROR', { targetId, error: error.message });
+      } catch (e) {
+        log('[ActionHandler] Unclaim error:', e && e.message ? e.message : e);
+        nexus.emit('TARGET_UNCLAIM_FAILED', { targetId, error: e && e.message ? e.message : String(e) });
       }
     }
+
+    
 
     // ============================================
     // REMOVE TARGET HANDLER
     // ============================================
     async function handleRemoveTarget(payload) {
       const { targetId } = payload || {};
-
-      if (!targetId) {
-        log('[ActionHandler] No targetId provided for removal');
-        return;
-      }
-
-      log('[ActionHandler] Removing target:', targetId);
+      if (!targetId) return;
 
       try {
-        const targets = storage.getJSON('odin_targets', {});
+        const targets = loadTargets();
+        if (targets[targetId]) delete targets[targetId];
+        saveTargets(targets);
 
-        if (!targets[targetId]) {
-          log('[ActionHandler] Target not found:', targetId);
-          return;
+        // also remove claim if any
+        const claims = loadClaims();
+        if (claims[targetId]) {
+          delete claims[targetId];
+          saveClaims(claims);
         }
-
-        delete targets[targetId];
-        \1
-        syncTargetsToStore(targets);
 
         nexus.emit('TARGET_REMOVED', { targetId });
 
-        log('[ActionHandler] Target removed successfully:', targetId);
-
-        // If Firebase is available, remove from database
-        if (ctx.firebase && ctx.firebase.ref) {
-          const factionId = ctx.store?.get('auth.factionId', null);
-          if (factionId) {
-            try {
-              await ctx.firebase.ref(`factions/${factionId}/targets/${targetId}`).remove();
-              log('[ActionHandler] Target removal synced to Firebase');
-            } catch (e) {
-              log('[ActionHandler] Failed to sync target removal to Firebase:', e.message);
-            }
-          }
+        // best-effort backend cleanup
+        if (ctx.firebase && typeof ctx.firebase.deleteDoc === 'function') {
+          try { await ctx.firebase.deleteDoc('claims', String(targetId)); } catch (_) {}
         }
-
-      } catch (error) {
-        log('[ActionHandler] Error removing target:', error.message);
-        nexus.emit('TARGET_REMOVE_ERROR', { targetId, error: error.message });
+      } catch (e) {
+        log('[ActionHandler] Remove target error:', e && e.message ? e.message : e);
+        nexus.emit('TARGET_REMOVE_FAILED', { targetId, error: e && e.message ? e.message : String(e) });
       }
     }
-
+// ============================================
+    // EVENT WIRING
     // ============================================
-    // MODULE LIFECYCLE
-    // ============================================
-    function init() {
-      log('[ActionHandler] Initializing v' + ACTION_VERSION);
-
-      // Register event handlers
-      nexus.on('ADD_TARGET', handleAddTarget);
-      nexus.on('CLAIM_TARGET', handleClaimTarget);
-      nexus.on('RELEASE_CLAIM', handleReleaseClaim);
-      nexus.on('REMOVE_TARGET', handleRemoveTarget);
-
-      log('[ActionHandler] Ready - Event handlers registered');
-    }
+    const offAdd = nexus.on ? nexus.on('ADD_TARGET', handleAddTarget) : null;
+    const offClaim = nexus.on ? nexus.on('CLAIM_TARGET', handleClaimTarget) : null;
+    const offUnclaim = nexus.on ? nexus.on('UNCLAIM_TARGET', handleUnclaimTarget) : null;
+    const offRelease = nexus.on ? nexus.on('RELEASE_CLAIM', handleUnclaimTarget) : null;
+    const offRemove = nexus.on ? nexus.on('REMOVE_TARGET', handleRemoveTarget) : null;
 
     function destroy() {
-      log('[ActionHandler] Destroying...');
-      // Event handlers will be automatically cleaned up by nexus
+      try { if (typeof offAdd === 'function') offAdd(); } catch (_) {}
+      try { if (typeof offClaim === 'function') offClaim(); } catch (_) {}
+      try { if (typeof offUnclaim === 'function') offUnclaim(); } catch (_) {}
+      try { if (typeof offRelease === 'function') offRelease(); } catch (_) {}
+      try { if (typeof offRemove === 'function') offRemove(); } catch (_) {}
     }
 
     return {
       id: 'action-handler',
-      init,
+      version: ACTION_VERSION,
+      init: function () {
+        bootstrapStateFromStorage();
+      },
       destroy
     };
   });
