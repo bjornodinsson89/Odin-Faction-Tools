@@ -247,6 +247,7 @@
               // Ignore undefined properties to prevent write errors
               ignoreUndefinedProperties: true
             });
+            }
             log('[Firebase] ✓ Firestore settings applied successfully');
             log('[Firebase]   - Long-polling transport: ENABLED (userscript-safe)');
             log('[Firebase]   - Ignore undefined properties: ENABLED');
