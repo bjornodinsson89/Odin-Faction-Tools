@@ -1,5 +1,6 @@
 /**
  * Odin Tools - Action Handler Module
+ * Handles user actions like adding targets, claiming targets, notes, etc.
  * Version: 1.1.0
  * Author: BjornOdinsson89
  */
@@ -55,7 +56,74 @@
     // ============================================
     // ADD TARGET HANDLER
     // ============================================
-    async function handleAddTarget(payload) {
+    
+    function mergeProfileIntoTarget(targetObj, profileData) {
+        if (!targetObj || typeof targetObj !== 'object' || !profileData || typeof profileData !== 'object') return;
+        // Core identity
+        if (typeof profileData.name === 'string' && profileData.name) targetObj.targetName = profileData.name;
+        if (typeof profileData.level === 'number') targetObj.level = profileData.level;
+        if (profileData.faction && typeof profileData.faction.faction_name === 'string' && profileData.faction.faction_name) {
+            targetObj.factionName = profileData.faction.faction_name;
+        }
+
+        // Status (hospital / jail / traveling / okay) + timers
+        const st = profileData.status && typeof profileData.status === 'object' ? profileData.status : {};
+        if (typeof st.state === 'string') targetObj.statusState = st.state;
+        if (typeof st.description === 'string') targetObj.statusDescription = st.description;
+        if (typeof st.until === 'number') targetObj.statusUntil = st.until;
+
+        // Last action (online/offline) + timestamp
+        const la = profileData.last_action && typeof profileData.last_action === 'object' ? profileData.last_action : {};
+        if (typeof la.status === 'string') targetObj.lastActionStatus = la.status;
+        if (typeof la.timestamp === 'number') targetObj.lastActionTimestamp = la.timestamp;
+        targetObj.online = (String(targetObj.lastActionStatus || '').toLowerCase() === 'online');
+
+        // Life
+        const lf = profileData.life && typeof profileData.life === 'object' ? profileData.life : {};
+        if (typeof lf.current === 'number') targetObj.lifeCurrent = lf.current;
+        if (typeof lf.maximum === 'number') targetObj.lifeMax = lf.maximum;
+
+        targetObj.updatedAt = Math.floor(Date.now() / 1000);
+    }
+
+    async function refreshOneTargetProfile(targetId, targetsObj) {
+        try {
+            const profileData = await ctx.api.getUserProfile(targetId);
+            if (!profileData) return false;
+            if (!targetsObj[targetId]) targetsObj[targetId] = { targetId: String(targetId) };
+            mergeProfileIntoTarget(targetsObj[targetId], profileData);
+            return true;
+        } catch (err) {
+            log.error('[ACTION] Failed to refresh target profile', { targetId, err });
+            return false;
+        }
+    }
+
+    let _refreshInFlight = false;
+    async function handleRefreshTargets() {
+        if (_refreshInFlight) return;
+        _refreshInFlight = true;
+        try {
+            const targets = await loadTargets();
+            const ids = Object.keys(targets || {});
+            if (!ids.length) {
+                nexus.emit('TARGETS_REFRESHED', { count: 0 });
+                return;
+            }
+            let updated = 0;
+            for (const targetId of ids) {
+                const ok = await refreshOneTargetProfile(targetId, targets);
+                if (ok) updated++;
+            }
+            await saveTargets(targets);
+            nexus.emit('TARGETS_UPDATED', targets);
+            nexus.emit('TARGETS_REFRESHED', { count: updated, total: ids.length });
+        } finally {
+            _refreshInFlight = false;
+        }
+    }
+
+async function handleAddTarget(payload) {
       const { targetId } = payload || {};
       if (!targetId) return;
 
@@ -89,19 +157,9 @@
           try {
             const profile = await ctx.api.getUserProfile(targetId);
             if (profile) {
-              targets[targetId].targetName = profile.name || null;
-              targets[targetId].level = profile.level || null;
-
-              // Torn V1 user profile can include faction object in some shapes
-              const factionName =
-                (profile.faction && (profile.faction.faction_name || profile.faction.name)) ||
-                profile.faction_name ||
-                null;
-
-              targets[targetId].factionName = factionName;
-              targets[targetId].lastUpdated = Date.now();
-
-              saveTargets(targets);
+                mergeProfileIntoTarget(targets[targetId], profile);
+                targets[targetId].lastUpdated = Date.now();
+            }saveTargets(targets);
               nexus.emit('TARGET_INFO_UPDATED', { targetId, target: targets[targetId] });
             }
           } catch (e) {
@@ -215,7 +273,8 @@
     const offAdd = nexus.on ? nexus.on('ADD_TARGET', handleAddTarget) : null;
     const offClaim = nexus.on ? nexus.on('CLAIM_TARGET', handleClaimTarget) : null;
     const offUnclaim = nexus.on ? nexus.on('UNCLAIM_TARGET', handleUnclaimTarget) : null;
-    const offRelease = nexus.on ? nexus.on('RELEASE_CLAIM', handleUnclaimTarget) : null;
+    const offRelease = nexus.on ? nexus.on('RELEASE_CLAIM', handleReleaseClaim) : null;
+    const offRefreshTargets = nexus.on ? nexus.on('REFRESH_TARGETS', handleRefreshTargets) : null;
     const offRemove = nexus.on ? nexus.on('REMOVE_TARGET', handleRemoveTarget) : null;
 
     function destroy() {
