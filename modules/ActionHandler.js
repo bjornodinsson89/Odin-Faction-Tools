@@ -1,6 +1,10 @@
 /**
  * Odin Tools - Action Handler Module
  * Handles user actions like adding targets, claiming targets, notes, etc.
+ * OFFLINE-TOLERANT:
+ *  - Always updates local storage immediately
+ *  - Mirrors storage state into ctx.store so UI updates instantly
+ *  - Emits Nexus events for other modules
  * Version: 1.1.0
  * Author: BjornOdinsson89
  */
@@ -157,16 +161,16 @@ async function handleAddTarget(payload) {
           try {
             const profile = await ctx.api.getUserProfile(targetId);
             if (profile) {
-                mergeProfileIntoTarget(targets[targetId], profile);
-                targets[targetId].lastUpdated = Date.now();
-            }saveTargets(targets);
+              mergeProfileIntoTarget(targets[targetId], profile);
+              targets[targetId].lastUpdated = Date.now();
+              saveTargets(targets);
               nexus.emit('TARGET_INFO_UPDATED', { targetId, target: targets[targetId] });
             }
           } catch (e) {
             log('[ActionHandler] Failed to fetch target profile (non-fatal):', e && e.message ? e.message : e);
           }
         }
-      } catch (e) {
+} catch (e) {
         log('[ActionHandler] Error adding target:', e && e.message ? e.message : e);
         nexus.emit('TARGET_ADD_FAILED', { targetId, error: e && e.message ? e.message : String(e) });
       }
