@@ -1,0 +1,80 @@
+rules_version = '2';
+// Odin Faction Tools - Firestore Security Rules
+// Version: 5.1.0
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAuthed() {
+      return request.auth != null;
+    }
+
+    function factionMatch(factionId) {
+      return isAuthed() && request.auth.token.factionId == factionId;
+    }
+
+    function getUserRole(factionId, userId) {
+      return get(/databases/$(database)/documents/factions/$(factionId)/roles/$(userId)).data.role;
+    }
+
+    function hasMinRole(factionId, minRole) {
+      let userRole = getUserRole(factionId, request.auth.uid);
+      // Role hierarchy: Developer > Leader > Admin > Member
+      let roleValue = userRole == 'Developer' ? 4 :
+                      userRole == 'Leader' ? 3 :
+                      userRole == 'Admin' ? 2 :
+                      userRole == 'Member' ? 1 : 0;
+      let minValue = minRole == 'Developer' ? 4 :
+                     minRole == 'Leader' ? 3 :
+                     minRole == 'Admin' ? 2 :
+                     minRole == 'Member' ? 1 : 0;
+      return roleValue >= minValue;
+    }
+
+    // Per-user documents (private to the signed-in user)
+    match /users/{userId} {
+      allow read, write: if isAuthed() && request.auth.uid == userId;
+    }
+    match /users/{userId}/{document=**} {
+      allow read, write: if isAuthed() && request.auth.uid == userId;
+    }
+
+    // Faction-scoped documents (read/write for faction members)
+    match /factions/{factionId} {
+      allow read, write: if factionMatch(factionId);
+    }
+
+    // Targets collection - rank-based access control
+    match /factions/{factionId}/targets/{targetId} {
+      // All faction members can read
+      allow read: if factionMatch(factionId);
+
+      // All faction members can create targets
+      allow create: if factionMatch(factionId);
+
+      // Only Leader or Admin can update/delete targets
+      allow update, delete: if factionMatch(factionId) && hasMinRole(factionId, 'Admin');
+    }
+
+    // Roles collection - read-only for faction members
+    match /factions/{factionId}/roles/{userId} {
+      allow read: if factionMatch(factionId);
+      allow write: if false; // Only writable by service account
+    }
+
+    // Other faction subcollections - default faction access
+    match /factions/{factionId}/{document=**} {
+      allow read, write: if factionMatch(factionId);
+    }
+
+    // Public, read-only Freki models
+    match /freki/models/{document=**} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
