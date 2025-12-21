@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Odin Faction Tools
 // @namespace    http://tampermonkey.net/
-// @version      5.2.0
-// @description  Torn City faction management tools with Firebase backend, comprehensive logging, and profile actions - AUDIT FIX: Firestore settings, graceful degradation, diagnostic logging
+// @version      5.2.1
+// @description  Torn City faction management tools with Firebase backend, comprehensive logging, and profile actions - BUG FIX: Remove invalid merge option from Firestore settings, fix profile button error handling
 // @author       BjornOdinsson89
 // @match        https://www.torn.com/*
 // @icon         https://i.postimg.cc/BQ6bSYKM/file-000000004bb071f5a96fc52564bf26ad-(1).png
@@ -40,7 +40,7 @@
      ODIN FACTION TOOLS - MAIN ENTRY POINT
      ============================================================ */
 
-  console.log('[Odin] Initializing Odin Faction Tools v5.2.0 (Audit Fix)');
+  console.log('[Odin] Initializing Odin Faction Tools v5.2.1 (Bug Fix - Firestore Settings)');
 
   // Verify Firebase is loaded
   if (typeof window.firebase === 'undefined') {
@@ -148,7 +148,7 @@
      ============================================================ */
   async function initializeOdin() {
     console.log('[Odin] ========================================');
-    console.log('[Odin] ODIN FACTION TOOLS v5.2.0 (Audit Fix)');
+    console.log('[Odin] ODIN FACTION TOOLS v5.2.1 (Bug Fix)');
     console.log('[Odin] Initialization started at:', new Date().toISOString());
     console.log('[Odin] ========================================');
 

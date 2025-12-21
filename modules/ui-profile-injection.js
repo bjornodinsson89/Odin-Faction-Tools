@@ -117,6 +117,8 @@
       if (ctx.nexus) {
         ctx.nexus.emit('CLAIM_TARGET', { targetId: playerId, type: 'attack' });
         showProfileToast('Target claimed!', 'success');
+      } else {
+        showProfileToast('Odin Tools not initialized. Please reload the page.', 'error');
       }
     };
 
@@ -149,6 +151,8 @@
       if (ctx.nexus) {
         ctx.nexus.emit('ADD_TARGET', { targetId: playerId });
         showProfileToast('Added to target list!', 'success');
+      } else {
+        showProfileToast('Odin Tools not initialized. Please reload the page.', 'error');
       }
     };
 
