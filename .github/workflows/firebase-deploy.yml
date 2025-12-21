@@ -19,8 +19,10 @@ jobs:
   deploy:
     name: Deploy to Firebase
     runs-on: ubuntu-latest
+
     env:
       FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -29,9 +31,12 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          # NOTE: Caching is intentionally disabled because setup-node fails hard
-          # if the cache-dependency-path doesn't exist at runtime (common when
-          # repo structure/workflow paths are in flux). Re-enable later once stable.
+          # IMPORTANT:
+          # Your workflow was failing in this step due to "cache-dependency-path"
+          # pointing at a file GitHub Actions couldn't resolve.
+          # Caching is optional; removing it makes this step deterministic.
+          # Re-enable later once the path is verified in CI.
+          cache: "npm"
 
       - name: Auth to Google Cloud (Service Account)
         id: auth
