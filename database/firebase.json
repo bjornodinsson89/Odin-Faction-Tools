@@ -1,5 +1,4 @@
 {
-  "version": "5.1.0",
   "functions": [{
     "source": "functions",
     "codebase": "default",
