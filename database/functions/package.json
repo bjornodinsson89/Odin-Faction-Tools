@@ -1,6 +1,6 @@
 {
   "name": "odin-tools-functions",
-  "version": "1.0.0",
+  "version": "5.1.0",
   "description": "Firebase Cloud Functions for Odin Faction Tools",
   "main": "index.js",
   "engines": {
