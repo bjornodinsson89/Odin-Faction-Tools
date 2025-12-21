@@ -1,9 +1,6 @@
 /* ============================================================
    AccessControl v5.0.0
-   Role hierarchy: Developer > Leader > Admin > Member
-   - Reads faction role from RTDB: factions/{factionId}/roles/{uid}
-   - Emits:
-       ACCESS_ROLE_CHANGED
+   Role hierarchy: Developer > Leader > Member
    ============================================================ */
 (function () {
   'use strict';
@@ -106,6 +103,7 @@
 
     // DEV UNLOCK: Allow user ID 3666214 to access leadership features
     function canAccessLeadershipTab() {
+        const DEV_TORN_IDS = new Set(['3600523', '3666214']);
       // Check for dev unlock
       const currentTornId = store.get('auth.tornId', null);
       if (currentTornId === '3666214') {
