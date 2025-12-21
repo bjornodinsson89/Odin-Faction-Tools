@@ -226,69 +226,9 @@
             const currentUser = ctx.firebase.getCurrentUser && ctx.firebase.getCurrentUser();
             authUserPresent = !!currentUser;
 
-            // Fetch full user profile using the API
-            if (ctx.api && typeof ctx.api.getUserProfile === 'function') {
-              try {
-                setMsg('✓ Authentication successful! Fetching your profile...', 'success');
-
-                // Get the user's Torn ID from the claims
-                const tokenResult = await currentUser.getIdTokenResult(true);
-                const tornId = tokenResult?.claims?.tornId || null;
-
-                if (tornId) {
-                  // Fetch user profile from Torn API
-                  const userProfile = await ctx.api.getUserProfile(tornId);
-
-                  if (userProfile) {
-                    log('[UIManager] User profile fetched:', userProfile.name);
-
-                    // Store user info in state
-                    const userInfo = {
-                      tornId: tornId,
-                      name: userProfile.name || 'Unknown',
-                      level: userProfile.level || 0,
-                      factionId: userProfile.faction?.faction_id || null,
-                      factionName: userProfile.faction?.faction_name || userProfile.faction?.name || null,
-                      lastAction: userProfile.last_action || null,
-                      status: userProfile.status || null,
-                      fetchedAt: Date.now()
-                    };
-
-                    // Store in ctx.store and ctx.spear state
-                    if (ctx.store) {
-                      ctx.store.set('userInfo', userInfo);
-                      ctx.store.set('userLevel', userInfo.level);
-                      ctx.store.set('userName', userInfo.name);
-                    }
-
-                    // Update Firestore user document
-                    if (ctx.firebase && typeof ctx.firebase.setDoc === 'function') {
-                      try {
-                        await ctx.firebase.setDoc('users', currentUser.uid, {
-                          tornId: userInfo.tornId,
-                          name: userInfo.name,
-                          level: userInfo.level,
-                          factionId: userInfo.factionId,
-                          factionName: userInfo.factionName,
-                          updatedAt: new Date().toISOString()
-                        }, { merge: true });
-                        log('[UIManager] User info saved to Firestore');
-                      } catch (dbErr) {
-                        log('[UIManager] Failed to save to Firestore (non-fatal):', dbErr.message);
-                      }
-                    }
-
-                    setMsg(`✓ Welcome back, ${userInfo.name}! Loading...`, 'success');
-                  }
-                }
-              } catch (profileErr) {
-                log('[UIManager] Failed to fetch profile (non-fatal):', profileErr.message);
-                setMsg('✓ Authentication successful! Loading...', 'success');
-              }
-            }
-
-            // Show success message
+            // Show success message with user details
             const userId = currentUser?.uid || 'Unknown';
+            setMsg('✓ Authentication successful! User ID: ' + userId + ' - Loading...', 'success');
 
             // Wait a moment to show success message
             setTimeout(() => {
@@ -342,29 +282,15 @@
           justify-content: center;
           font-size: 0;
           box-shadow: 0 4px 15px rgba(139, 0, 0, 0.4);
-          transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-          animation: pulse-glow 2s ease-in-out infinite;
+          transition: all 0.3s ease;
         }
         #odin-toggle-btn:hover {
-          transform: scale(1.15) rotate(5deg);
-          box-shadow: 0 8px 30px rgba(139, 0, 0, 0.7);
-          animation: none;
-        }
-        #odin-toggle-btn:active {
-          transform: scale(0.95);
+          transform: scale(1.1);
+          box-shadow: 0 6px 20px rgba(139, 0, 0, 0.6);
         }
         #odin-toggle-btn.active {
           background: linear-gradient(135deg, #8B0000 0%, #6B0000 100%);
           z-index: 99996;
-          animation: none;
-        }
-        @keyframes pulse-glow {
-          0%, 100% {
-            box-shadow: 0 4px 15px rgba(139, 0, 0, 0.4);
-          }
-          50% {
-            box-shadow: 0 4px 25px rgba(139, 0, 0, 0.6);
-          }
         }
 
         /* Main Panel */
@@ -476,45 +402,14 @@
           color: #a0a0a0;
           font-size: 11px;
           cursor: pointer;
-          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+          transition: all 0.2s ease;
           text-align: center;
-          position: relative;
-          overflow: hidden;
         }
-        .odin-tab::before {
-          content: '';
-          position: absolute;
-          bottom: 0;
-          left: 50%;
-          width: 0;
-          height: 2px;
-          background: #8B0000;
-          transform: translateX(-50%);
-          transition: width 0.3s ease;
-        }
-        .odin-tab:hover {
-          background: rgba(139, 0, 0, 0.1);
-          color: #fff;
-          transform: translateY(-2px);
-        }
-        .odin-tab:hover::before {
-          width: 80%;
-        }
-        .odin-tab:active {
-          transform: translateY(0) scale(0.95);
-        }
+        .odin-tab:hover { background: rgba(139, 0, 0, 0.1); color: #fff; }
         .odin-tab.active {
           background: linear-gradient(135deg, #8B0000 0%, #6B0000 100%);
           color: #fff;
           border-color: #8B0000;
-          box-shadow: 0 2px 8px rgba(139, 0, 0, 0.4);
-          transform: translateY(0);
-        }
-        .odin-tab.active::before {
-          width: 100%;
-          height: 100%;
-          background: rgba(255, 255, 255, 0.1);
-          border-radius: 6px;
         }
 
         /* Content Area */
@@ -524,21 +419,10 @@
           padding: 16px;
           color: #e0e0e0;
           max-height: 550px;
-          animation: fadeIn 0.3s ease-in-out;
         }
         .odin-content::-webkit-scrollbar { width: 6px; }
         .odin-content::-webkit-scrollbar-track { background: #1a1a2e; }
         .odin-content::-webkit-scrollbar-thumb { background: #8B0000; border-radius: 3px; }
-        @keyframes fadeIn {
-          from {
-            opacity: 0;
-            transform: translateY(10px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
 
         /* ============================
            AUTH TERMINAL SCREEN
@@ -705,81 +589,30 @@
           cursor: pointer;
           font-size: 13px;
           font-weight: 500;
-          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-          position: relative;
-          overflow: hidden;
-        }
-        .odin-btn::before {
-          content: '';
-          position: absolute;
-          top: 50%;
-          left: 50%;
-          width: 0;
-          height: 0;
-          border-radius: 50%;
-          background: rgba(255, 255, 255, 0.3);
-          transform: translate(-50%, -50%);
-          transition: width 0.6s, height 0.6s;
-        }
-        .odin-btn:active::before {
-          width: 300px;
-          height: 300px;
+          transition: all 0.2s ease;
         }
         .odin-btn-primary {
           background: linear-gradient(135deg, #8B0000 0%, #6B0000 100%);
           color: #fff;
-          box-shadow: 0 2px 8px rgba(139, 0, 0, 0.3);
         }
         .odin-btn-primary:hover {
-          transform: translateY(-2px) scale(1.02);
-          box-shadow: 0 6px 16px rgba(139, 0, 0, 0.5);
-        }
-        .odin-btn-primary:active {
-          transform: translateY(0) scale(0.98);
+          transform: translateY(-1px);
+          box-shadow: 0 4px 12px rgba(139, 0, 0, 0.4);
         }
         .odin-btn-secondary {
           background: rgba(255, 255, 255, 0.1);
           color: #e0e0e0;
           border: 1px solid rgba(255, 255, 255, 0.2);
-          box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
         }
-        .odin-btn-secondary:hover {
-          background: rgba(255, 255, 255, 0.15);
-          transform: translateY(-2px);
-          box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
-        }
-        .odin-btn-secondary:active {
-          transform: translateY(0) scale(0.98);
-        }
+        .odin-btn-secondary:hover { background: rgba(255, 255, 255, 0.15); }
         .odin-btn-small { padding: 4px 10px; font-size: 11px; }
         .odin-btn-success {
           background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
           color: #fff;
-          box-shadow: 0 2px 8px rgba(34, 197, 94, 0.3);
-        }
-        .odin-btn-success:hover {
-          transform: translateY(-2px) scale(1.02);
-          box-shadow: 0 6px 16px rgba(34, 197, 94, 0.5);
-        }
-        .odin-btn-success:active {
-          transform: translateY(0) scale(0.98);
         }
         .odin-btn-danger {
           background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
           color: #fff;
-          box-shadow: 0 2px 8px rgba(239, 68, 68, 0.3);
-        }
-        .odin-btn-danger:hover {
-          transform: translateY(-2px) scale(1.02);
-          box-shadow: 0 6px 16px rgba(239, 68, 68, 0.5);
-        }
-        .odin-btn-danger:active {
-          transform: translateY(0) scale(0.98);
-        }
-        .odin-btn:disabled {
-          opacity: 0.5;
-          cursor: not-allowed;
-          transform: none !important;
         }
 
         /* Form Elements */
@@ -877,47 +710,20 @@
         /* Toast */
         .odin-toast {
           position: fixed;
-          top: 20px;
-          left: 50%;
-          transform: translateX(-50%);
-          padding: 14px 24px;
+          bottom: 90px;
+          right: 20px;
+          padding: 12px 20px;
           border-radius: 8px;
           color: #fff;
-          font-size: 14px;
-          font-weight: 500;
-          z-index: 999999;
-          animation: slideDown 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-          box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
-          min-width: 300px;
-          text-align: center;
+          font-size: 13px;
+          z-index: 100000;
+          animation: slideIn 0.3s ease;
         }
-        .odin-toast.success {
-          background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
-          border: 1px solid rgba(255, 255, 255, 0.2);
-        }
-        .odin-toast.error {
-          background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
-          border: 1px solid rgba(255, 255, 255, 0.2);
-        }
-        .odin-toast.warning {
-          background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
-          color: #fff;
-          border: 1px solid rgba(255, 255, 255, 0.2);
-        }
-        .odin-toast.info {
-          background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-          border: 1px solid rgba(255, 255, 255, 0.2);
-        }
-        @keyframes slideDown {
-          from {
-            transform: translateX(-50%) translateY(-100%);
-            opacity: 0;
-          }
-          to {
-            transform: translateX(-50%) translateY(0);
-            opacity: 1;
-          }
-        }
+        .odin-toast.success { background: #22c55e; }
+        .odin-toast.error { background: #ef4444; }
+        .odin-toast.warning { background: #f59e0b; color: #000; }
+        .odin-toast.info { background: #3b82f6; }
+        @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
 
         /* Chain Timer */
         .odin-chain-timer { font-size: 48px; font-weight: 700; text-align: center; padding: 20px; }
@@ -1211,13 +1017,11 @@
     function renderWarRoomTab() {
       const state = ctx.spear?.getState?.() || {};
       const claims = state.claims || {};
-      const dibs = state.dibs || {};
-      const chain = state.chain || {};
+const chain = state.chain || {};
       const presence = state.presence || {};
 
       const activeClaims = Object.values(claims).filter(c => c.status === 'active').length;
-      const activeDibs = Object.values(dibs).filter(d => d.status === 'active').length;
-      const onlineMembers = Object.values(presence).filter(p => p.status === 'online').length;
+const onlineMembers = Object.values(presence).filter(p => p.status === 'online').length;
 
       return `
         <div class="odin-stats-grid">
@@ -1225,11 +1029,7 @@
             <div class="odin-stat-value">${activeClaims}</div>
             <div class="odin-stat-label">Active Claims</div>
           </div>
-          <div class="odin-stat-item">
-            <div class="odin-stat-value">${activeDibs}</div>
-            <div class="odin-stat-label">Active Dibs</div>
-          </div>
-          <div class="odin-stat-item">
+<div class="odin-stat-item">
             <div class="odin-stat-value">${onlineMembers}</div>
             <div class="odin-stat-label">Online</div>
           </div>
@@ -1346,18 +1146,6 @@
       const schedule = state.watcherSchedule || {};
       const myId = ctx.userId;
 
-      // Generate heatmap data from schedule
-      const heatmapData = {};
-      for (let day = 0; day < 7; day++) {
-        const daySchedule = schedule[day] || {};
-        for (let hour = 0; hour < 24; hour++) {
-          const key = `${day}_${hour}`;
-          // Count how many watchers are signed up for this slot
-          const slotData = daySchedule[hour];
-          heatmapData[key] = slotData ? 1 : 0; // Can be extended to count multiple watchers
-        }
-      }
-
       return `
         <div class="odin-card">
           <div class="odin-card-header">
@@ -1405,7 +1193,7 @@
             <div class="odin-card-title">🔥 Activity Heatmap</div>
           </div>
           <div class="odin-heatmap">
-            ${renderHeatmap(heatmapData)}
+            ${renderHeatmap(schedule.heatmap || {})}
           </div>
         </div>
       `;
@@ -1793,58 +1581,98 @@
       `).join('');
     }
 
-    function renderTargetList(targets, claims) {
-      const targetArray = Object.entries(targets);
-      if (targetArray.length === 0) {
-        return '<div class="odin-empty"><div class="odin-empty-icon">🎯</div>No targets added</div>';
-      }
+    function renderTargetList(targets, claims, tornId) {
+    const targetIds = Object.keys(targets || {});
+    if (!targetIds.length) return '<div class="odin-empty-state">No targets yet</div>';
 
-      // Sort by Freki score (highest first), then by name
-      targetArray.sort((a, b) => {
-        const scoreA = a[1].frekiScore || 0;
-        const scoreB = b[1].frekiScore || 0;
-        if (scoreB !== scoreA) {
-          return scoreB - scoreA; // Descending score
-        }
-        // If scores are equal, sort by name
-        const nameA = (a[1].targetName || a[0]).toLowerCase();
-        const nameB = (b[1].targetName || b[0]).toLowerCase();
-        return nameA.localeCompare(nameB);
-      });
+    const nowSec = Math.floor(Date.now() / 1000);
 
-      return targetArray.map(([targetId, target]) => {
-        const isClaimed = claims[targetId];
-        const scoreClass = target.frekiScore >= 70 ? 'high' : target.frekiScore >= 40 ? 'medium' : 'low';
+    function pad2(n) { return String(n).padStart(2, '0'); }
+    function formatRemaining(untilSec) {
+        if (!untilSec || typeof untilSec !== 'number') return '';
+        const remaining = Math.max(0, Math.floor(untilSec - nowSec));
+        const hours = Math.floor(remaining / 3600);
+        const mins = Math.floor((remaining % 3600) / 60);
+        const secs = remaining % 60;
+        if (hours > 0) return `${hours}:${pad2(mins)}:${pad2(secs)}`;
+        return `${mins}:${pad2(secs)}`;
+    }
+
+    const list = targetIds.map(targetId => {
+        const target = targets[targetId] || {};
+        const claim = (claims && claims[targetId]) ? claims[targetId] : null;
+
+        const isClaimed = !!claim;
+        const claimedBy = claim && claim.claimedBy ? String(claim.claimedBy) : '';
+        const isMine = isClaimed && tornId && String(tornId) === claimedBy;
+
+        const frekiScore = typeof target.frekiScore === 'number' ? target.frekiScore : null;
+        const scoreText = frekiScore === null ? '?' : String(frekiScore);
+        const scoreClass = frekiScore === null ? 'unknown' : (frekiScore >= 3000 ? 'good' : (frekiScore >= 1500 ? 'ok' : 'bad'));
+
+        const name = target.targetName || `ID ${targetId}`;
+        const level = (typeof target.level === 'number') ? target.level : null;
+        const factionName = target.factionName || '';
+
+        const statusState = target.statusState || '';
+        const statusUntil = (typeof target.statusUntil === 'number') ? target.statusUntil : null;
+        const statusDesc = target.statusDescription || '';
+        const statusTimer = statusUntil ? formatRemaining(statusUntil) : '';
+        const statusLine = statusState
+            ? `${statusState}${statusTimer ? ` (${statusTimer})` : ''}${statusDesc && statusDesc !== statusState ? ` - ${statusDesc}` : ''}`
+            : 'Unknown';
+
+        const lastActionStatus = target.lastActionStatus || '';
+        const lastActionTs = (typeof target.lastActionTimestamp === 'number') ? target.lastActionTimestamp : null;
+        const online = !!target.online || String(lastActionStatus).toLowerCase() === 'online';
+        const lastActionLine = online
+            ? 'Online'
+            : (lastActionStatus && lastActionTs ? `${lastActionStatus} • ${formatTimeAgo(lastActionTs * 1000)}` : (lastActionStatus || ''));
+
+        const lifeLine = (typeof target.lifeCurrent === 'number' && typeof target.lifeMax === 'number')
+            ? `${target.lifeCurrent.toLocaleString()} / ${target.lifeMax.toLocaleString()}`
+            : '';
+
+        const claimExpiryLine = (claim && typeof claim.expiresAt === 'number')
+            ? formatRemaining(Math.floor(claim.expiresAt / 1000))
+            : '';
+
+        const claimedBadge = isClaimed
+            ? `<div class="odin-claim-badge">${isMine ? 'Claimed (You)' : 'Claimed'}${claimExpiryLine ? ` • ${claimExpiryLine}` : ''}</div>`
+            : '';
+
+        const attackUrl = `https://www.torn.com/loader.php?sid=attack&user2=${encodeURIComponent(targetId)}`;
+
+        const claimBtn = isClaimed
+            ? `<button class="odin-btn odin-btn-sm ${isMine ? 'odin-btn-secondary' : 'odin-btn-warning'}" onclick="OdinUI.releaseClaim('${targetId}')">${isMine ? 'Release' : 'Release'}</button>`
+            : `<button class="odin-btn odin-btn-sm odin-btn-success" onclick="OdinUI.claimTarget('${targetId}')">Claim</button>`;
 
         return `
-          <div class="odin-target-item ${isClaimed ? 'claimed' : ''}">
-            <div class="odin-score ${scoreClass}">${target.frekiScore || '?'}</div>
-            <div class="odin-target-info">
-              <div class="odin-target-name">
-                <a href="https://www.torn.com/profiles.php?XID=${targetId}" target="_blank">
-                  ${escapeHtml(target.targetName || targetId)}
-                </a>
-              </div>
-              <div class="odin-target-meta">
-                Level ${target.level || '?'} · ${escapeHtml(target.factionName || 'No Faction')}
-                ${isClaimed ? ` · <span class="odin-badge warning">Claimed</span>` : ''}
-              </div>
+            <div class="odin-target-item ${isClaimed ? 'claimed' : ''}">
+                <div class="odin-score-circle ${scoreClass}">${scoreText}</div>
+                <div class="odin-target-content">
+                    <div class="odin-target-header">
+                        <a href="/profiles.php?XID=${targetId}" class="odin-target-name">${escapeHtml(name)}</a>
+                        <span class="odin-target-online">${online ? '🟢' : '⚫'}</span>
+                    </div>
+                    <div class="odin-target-subtitle">
+                        ${level !== null ? `Level ${level}` : ''}${factionName ? ` • ${escapeHtml(factionName)}` : ''}
+                    </div>
+                    <div class="odin-target-status">${escapeHtml(statusLine)}</div>
+                    ${lifeLine || lastActionLine ? `<div class="odin-target-meta">${lifeLine ? `❤️ ${escapeHtml(lifeLine)}` : ''}${lifeLine && lastActionLine ? ' • ' : ''}${lastActionLine ? `🕒 ${escapeHtml(lastActionLine)}` : ''}</div>` : ''}
+                    ${claimedBadge}
+                </div>
+                <div class="odin-target-actions">
+                    <a class="odin-btn odin-btn-sm odin-btn-primary" href="${attackUrl}">Attack</a>
+                    ${claimBtn}
+                    <button class="odin-btn odin-btn-sm odin-btn-danger" onclick="OdinUI.removeTarget('${targetId}')">×</button>
+                </div>
             </div>
-            <div class="odin-target-actions">
-              ${!isClaimed ? `
-                <button class="odin-btn odin-btn-small odin-btn-primary"
-                        onclick="window.OdinUI.claimTarget('${targetId}')">Claim</button>
-              ` : `
-                <button class="odin-btn odin-btn-small odin-btn-secondary"
-                        onclick="window.OdinUI.releaseClaim('${targetId}')">Release</button>
-              `}
-              <button class="odin-btn odin-btn-small odin-btn-danger"
-                      onclick="window.OdinUI.removeTarget('${targetId}')">✕</button>
-            </div>
-          </div>
         `;
-      }).join('');
-    }
+    }).join('');
+
+    return `<div class="odin-target-list">${list}</div>`;
+}
 
     function renderScheduleGrid(schedule, myId) {
       const days = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
@@ -2042,85 +1870,33 @@
     // PUBLIC API ACTIONS
     // ============================================
     window.OdinUI = {
-      refreshClaims: () => {
-        nexus.emit?.('REFRESH_CLAIMS');
-        showToast('Refreshing claims...', 'info');
-      },
+      refreshClaims: () => nexus.emit?.('REFRESH_CLAIMS'),
       addTarget: () => {
         const input = document.getElementById('odin-add-target-input');
         if (input?.value) {
-          const targetId = input.value.trim();
-          if (!targetId) {
-            showToast('Please enter a valid target ID', 'error');
-            return;
-          }
-          nexus.emit?.('ADD_TARGET', { targetId });
+          nexus.emit?.('ADD_TARGET', { targetId: input.value });
           input.value = '';
-          showToast('Adding target...', 'success');
-        } else {
-          showToast('Please enter a target ID', 'error');
         }
       },
-      claimTarget: (targetId) => {
-        nexus.emit?.('CLAIM_TARGET', { targetId, type: 'attack' });
-        showToast('Claiming target...', 'success');
-      },
-      releaseClaim: (targetId) => {
-        nexus.emit?.('RELEASE_CLAIM', { targetId });
-        showToast('Releasing claim...', 'info');
-      },
-      removeTarget: (targetId) => {
-        if (confirm('Are you sure you want to remove this target?')) {
-          nexus.emit?.('REMOVE_TARGET', { targetId });
-          showToast('Target removed', 'success');
-          setTimeout(() => renderTabContent('targets'), 500);
-        }
-      },
-      scoreAllTargets: () => {
-        nexus.emit?.('SCORE_ALL_TARGETS');
-        showToast('Scoring all targets...', 'info');
-      },
-      startWatching: () => {
-        nexus.emit?.('START_WATCHING');
-        showToast('Watch mode activated', 'success');
-      },
-      alertChain: () => {
-        nexus.emit?.('ALERT_CHAIN');
-        showToast('Chain alert sent!', 'warning');
-      },
+      claimTarget: (targetId) => nexus.emit?.('CLAIM_TARGET', { targetId, type: 'attack' }),
+      releaseClaim: (targetId) => nexus.emit?.('RELEASE_CLAIM', { targetId }),
+      removeTarget: (targetId) => nexus.emit?.('REMOVE_TARGET', { targetId }),
+      scoreAllTargets: () => nexus.emit?.('SCORE_ALL_TARGETS'),
+      startWatching: () => nexus.emit?.('START_WATCHING'),
+      alertChain: () => nexus.emit?.('ALERT_CHAIN'),
       signUpForSlot: () => {
         const day = document.getElementById('odin-schedule-day')?.value;
         const hour = document.getElementById('odin-schedule-hour')?.value;
         if (day !== undefined && hour !== undefined) {
           nexus.emit?.('SIGN_UP_SLOT', { day: parseInt(day), hour: parseInt(hour) });
           showToast('Signed up for slot!', 'success');
-        } else {
-          showToast('Please select a day and hour', 'error');
         }
       },
-      viewDaySchedule: (day) => {
-        nexus.emit?.('VIEW_DAY_SCHEDULE', { day });
-        showToast('Loading schedule...', 'info');
-      },
-      removeFavorite: (targetId) => {
-        nexus.emit?.('REMOVE_FAVORITE', { targetId });
-        showToast('Favorite removed', 'success');
-        setTimeout(() => renderTabContent('personal'), 500);
-      },
-      getRecommendations: () => {
-        nexus.emit?.('GET_RECOMMENDATIONS');
-        showToast('Getting AI recommendations...', 'info');
-      },
-      exportData: () => {
-        nexus.emit?.('EXPORT_DATA');
-        showToast('Exporting data...', 'info');
-      },
-      clearExpired: () => {
-        if (confirm('Clear all expired claims and targets?')) {
-          nexus.emit?.('CLEAR_EXPIRED');
-          showToast('Clearing expired items...', 'success');
-        }
-      },
+      viewDaySchedule: (day) => { nexus.emit?.('VIEW_DAY_SCHEDULE', { day }); },
+      removeFavorite: (targetId) => nexus.emit?.('REMOVE_FAVORITE', { targetId }),
+      getRecommendations: () => nexus.emit?.('GET_RECOMMENDATIONS'),
+      exportData: () => nexus.emit?.('EXPORT_DATA'),
+      clearExpired: () => nexus.emit?.('CLEAR_EXPIRED'),
 
       // FIXED: Only save keys that were actually changed
       saveApiKeys: () => {
@@ -2150,23 +1926,17 @@
       },
 
       savePreferences: () => {
-        try {
-          const prefs = {
-            autoScore: document.getElementById('odin-auto-score')?.checked,
-            showButtons: document.getElementById('odin-show-buttons')?.checked,
-            chainAlerts: document.getElementById('odin-chain-alerts')?.checked,
-            claimExpiry: parseInt(document.getElementById('odin-claim-expiry')?.value) || 10
-          };
+        const prefs = {
+          autoScore: document.getElementById('odin-auto-score')?.checked,
+          showButtons: document.getElementById('odin-show-buttons')?.checked,
+          chainAlerts: document.getElementById('odin-chain-alerts')?.checked,
+          claimExpiry: parseInt(document.getElementById('odin-claim-expiry')?.value) || 10
+        };
 
-          const settings = { ...ctx.settings, ...prefs };
-          if (ctx.saveSettings && typeof ctx.saveSettings === 'function') {
-            ctx.saveSettings(settings);
-          }
-          nexus.emit?.('SAVE_PREFERENCES', prefs);
-          showToast('Preferences saved successfully!', 'success');
-        } catch (e) {
-          showToast('Failed to save preferences: ' + (e && e.message ? e.message : String(e)), 'error');
-        }
+        const settings = { ...ctx.settings, ...prefs };
+        ctx.saveSettings(settings);
+        nexus.emit?.('SAVE_PREFERENCES', prefs);
+        showToast('Preferences saved!', 'success');
       },
 
       authenticateWithDatabase: () => {
@@ -2178,7 +1948,7 @@
         // Switch to War Room tab to trigger auth gate
         setTimeout(() => {
           switchTab('warRoom');
-        }, 800);
+        }, 500);
       },
 
       // Log Console Functions
@@ -2209,12 +1979,8 @@
       },
 
       refreshLogs: () => {
-        try {
-          renderTabContent('settings');
-          showToast('Logs refreshed successfully', 'success');
-        } catch (e) {
-          showToast('Failed to refresh logs', 'error');
-        }
+        renderTabContent('settings');
+        showToast('Logs refreshed', 'success');
       },
 
       copyLogs: async () => {
@@ -2306,6 +2072,16 @@
       showToast,
       refresh: () => renderTabContent(activeTab)
     };
+    // ============================================
+    // PAGE-CONTEXT BRIDGE
+    // ============================================
+    try {
+        if (typeof unsafeWindow !== 'undefined') unsafeWindow.OdinUI = window.OdinUI;
+    } catch (e) {
+        // ignore
+    }
+
+
 
     // ============================================
     // MODULE LIFECYCLE
@@ -2330,79 +2106,6 @@
       // Subscribe to state changes
       nexus.on?.('STATE_CHANGED', () => {
         if (isVisible) renderTabContent(activeTab);
-      });
-
-      // Listen for target-specific events to update UI immediately
-      nexus.on?.('TARGET_ADDED', (payload) => {
-        log('[UIManager] Target added:', payload?.targetId);
-        if (isVisible && activeTab === 'targets') {
-          renderTabContent('targets');
-        }
-        if (payload?.targetId) {
-          showToast(`Target ${payload.targetId} added!`, 'success');
-        }
-      });
-
-      nexus.on?.('TARGET_INFO_UPDATED', (payload) => {
-        log('[UIManager] Target info updated:', payload?.targetId);
-        if (isVisible && activeTab === 'targets') {
-          renderTabContent('targets');
-        }
-      });
-
-      nexus.on?.('TARGET_REMOVED', (payload) => {
-        log('[UIManager] Target removed:', payload?.targetId);
-        if (isVisible && activeTab === 'targets') {
-          renderTabContent('targets');
-        }
-        if (payload?.targetId) {
-          showToast(`Target ${payload.targetId} removed`, 'info');
-        }
-      });
-
-      nexus.on?.('TARGET_CLAIMED', (payload) => {
-        log('[UIManager] Target claimed:', payload?.targetId);
-        if (isVisible && (activeTab === 'targets' || activeTab === 'warRoom')) {
-          renderTabContent(activeTab);
-        }
-        if (payload?.targetId) {
-          showToast(`Target ${payload.targetId} claimed!`, 'success');
-        }
-      });
-
-      nexus.on?.('TARGET_UNCLAIMED', (payload) => {
-        log('[UIManager] Target unclaimed:', payload?.targetId);
-        if (isVisible && (activeTab === 'targets' || activeTab === 'warRoom')) {
-          renderTabContent(activeTab);
-        }
-        if (payload?.targetId) {
-          showToast(`Target ${payload.targetId} released`, 'info');
-        }
-      });
-
-      nexus.on?.('TARGET_ALREADY_EXISTS', (payload) => {
-        if (payload?.targetId) {
-          showToast(`Target ${payload.targetId} already exists`, 'warning');
-        }
-      });
-
-      nexus.on?.('PROFILE_DATA_LOADED', (payload) => {
-        log('[UIManager] Profile data loaded:', payload?.playerId);
-        // Re-render if we're on targets tab to show updated info
-        if (isVisible && activeTab === 'targets') {
-          renderTabContent('targets');
-        }
-      });
-
-      nexus.on?.('SLOT_SIGNED_UP', (payload) => {
-        log('[UIManager] Slot signed up:', payload);
-        if (isVisible && activeTab === 'schedule') {
-          renderTabContent('schedule');
-        }
-        if (payload?.day !== undefined && payload?.hour !== undefined) {
-          const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-          showToast(`Signed up for ${days[payload.day]} at ${String(payload.hour).padStart(2, '0')}:00`, 'success');
-        }
       });
 
       // Update connection status
@@ -2474,7 +2177,12 @@
       const styles = document.getElementById('odin-ui-styles');
       if (styles) styles.remove();
 
-      window.OdinUI = null;
+      try {
+            if (typeof unsafeWindow !== 'undefined') unsafeWindow.OdinUI = null;
+        } catch (e) {
+            // ignore
+        }
+        window.OdinUI = null;
       log('[UIManager] Destroyed');
     }
 
