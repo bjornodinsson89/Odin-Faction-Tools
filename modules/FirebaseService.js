@@ -233,10 +233,16 @@
           // This must be done exactly ONCE and BEFORE any Firestore operations
           try {
             log('[Firebase] Applying Firestore settings...');
+            if (!fs.__odinSettingsApplied) {
+            fs.__odinSettingsApplied = true;
             fs.settings({
               // Use long-polling instead of WebSocket for userscript compatibility
               // WebSocket connections often fail in Tampermonkey/Greasemonkey environments
+              experimentalAutoDetectLongPolling: true,
+
               experimentalForceLongPolling: true,
+
+              useFetchStreams: false,
 
               // Ignore undefined properties to prevent write errors
               ignoreUndefinedProperties: true
