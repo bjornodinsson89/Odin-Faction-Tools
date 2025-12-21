@@ -197,6 +197,28 @@
       ctx.error = ctx.error || console.error.bind(console);
       ctx.now = ctx.now || (() => Date.now());
 
+// Activity buffer (used by UI)
+const __activity = [];
+const __pushActivity = (level, args) => {
+  try {
+    __activity.push({
+      ts: ctx.now(),
+      level,
+      message: args && args.length ? String(args[0]) : '',
+      args: Array.isArray(args) ? args.slice(0, 6) : []
+    });
+    if (__activity.length > 100) __activity.splice(0, __activity.length - 100);
+  } catch (_) {}
+};
+const __wrapLog = (level, fn) => (...args) => {
+  __pushActivity(level, args);
+  return fn(...args);
+};
+ctx.log = __wrapLog('log', ctx.log);
+ctx.warn = __wrapLog('warn', ctx.warn);
+ctx.error = __wrapLog('error', ctx.error);
+ctx.__activity = __activity;
+
       // Settings (non-secret) persisted locally
       ctx.settings = ctx.settings || ctx.storage.getJSON('settings', {});
       ctx.saveSettings = ctx.saveSettings || function saveSettings(next) {
@@ -206,6 +228,13 @@
         try { ctx.store.set('settings', s); } catch (_) {}
         try { ctx.nexus.emit('SETTINGS_UPDATED', s); } catch (_) {}
       };
+
+// Expose a small runtime API for modules/UI
+ctx.spear = ctx.spear || {
+  version: runtime.version,
+  getState: () => ctx.store.snapshot(),
+  getRecentActivity: () => (ctx.__activity ? ctx.__activity.slice().reverse() : [])
+};
 
       window.OdinContext = ctx;
 
