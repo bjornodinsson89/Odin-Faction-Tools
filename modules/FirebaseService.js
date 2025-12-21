@@ -1,11 +1,16 @@
 /* ============================================================
-   FirebaseService v5.0.0 (SaaS Auth + Gatekeeper)
+   FirebaseService (SaaS Auth + Gatekeeper) - Userscript-safe
    - Initializes Firebase compat SDK
-   - Calls Gatekeeper Cloud Function authenticateWithTorn (one-time API key use)
+   - Calls Gatekeeper Cloud Function authenticateWithTorn
    - Tracks RTDB connectivity and auth state
+   - Provides Firestore facade that is OFFLINE-TOLERANT:
+       * If Firestore transport is down, reads return null/[] and writes are queued locally
+       * Queue flushes automatically when Firestore becomes reachable again
    - Emits Nexus events:
        FIREBASE_CONNECTED / FIREBASE_DISCONNECTED
+       FIRESTORE_CONNECTED / FIRESTORE_DISCONNECTED
        AUTH_STATE_CHANGED
+       AUTH_SUCCESS / AUTH_ERROR
    ============================================================ */
 (function () {
   'use strict';
@@ -35,39 +40,121 @@
     return typeof v === 'string' ? v.trim() : '';
   }
 
+  function nowIso() {
+    try { return new Date().toISOString(); } catch (_) { return String(Date.now()); }
+  }
+
   window.OdinModules.push(function FirebaseServiceModuleInit(ctx) {
+    ctx = ctx || {};
     const nexus = ctx.nexus;
     const store = ctx.store;
+    const storage = ctx.storage;
     const log = ctx.log || console.log;
 
     let app = null;
     let auth = null;
     let db = null;
     let fs = null;
-    \1    let firestoreSettingsApplied = false;
+    let fn = null;
 
     let connected = false;
     let firestoreReady = false;
+
     let unsubAuth = null;
     let unsubConn = null;
+
+    // Firestore safety / offline queue
+    let firestoreSettingsApplied = false;
     let firestoreTestInterval = null;
+    let flushInProgress = false;
+
+    const FS_QUEUE_KEY = 'firestore.queue.v1';
+    const FS_QUEUE_MAX = 500;
+
+    function getQueue() {
+      const q = storage?.getJSON ? storage.getJSON(FS_QUEUE_KEY, []) : [];
+      return Array.isArray(q) ? q : [];
+    }
+
+    function setQueue(q) {
+      if (!storage?.setJSON) return;
+      storage.setJSON(FS_QUEUE_KEY, Array.isArray(q) ? q : []);
+    }
+
+    function enqueueOp(op) {
+      const q = getQueue();
+      q.push(op);
+      // keep bounded
+      if (q.length > FS_QUEUE_MAX) q.splice(0, q.length - FS_QUEUE_MAX);
+      setQueue(q);
+      store?.set?.('firebase.fsQueueSize', q.length);
+      nexus?.emit?.('FIRESTORE_QUEUE_UPDATED', { size: q.length });
+    }
+
+    async function flushQueue() {
+      if (!fs || !firestoreReady) return false;
+      if (flushInProgress) return false;
+      flushInProgress = true;
+
+      try {
+        let q = getQueue();
+        if (!q.length) {
+          store?.set?.('firebase.fsQueueSize', 0);
+          return true;
+        }
+
+        // flush sequentially to be gentle on rate limits / avoid bursts
+        const remaining = [];
+        for (const op of q) {
+          try {
+            if (!op || !op.t || !op.p) continue;
+
+            if (op.t === 'set') {
+              const ref = fs.collection(op.p.c).doc(op.p.id);
+              if (op.p.merge) await ref.set(op.p.data || {}, { merge: true });
+              else await ref.set(op.p.data || {});
+            } else if (op.t === 'update') {
+              const ref = fs.collection(op.p.c).doc(op.p.id);
+              await ref.update(op.p.data || {});
+            } else if (op.t === 'delete') {
+              const ref = fs.collection(op.p.c).doc(op.p.id);
+              await ref.delete();
+            } else {
+              // unknown op type, drop it
+            }
+          } catch (e) {
+            // keep it for later
+            remaining.push(op);
+          }
+        }
+
+        setQueue(remaining);
+        store?.set?.('firebase.fsQueueSize', remaining.length);
+        if (remaining.length !== q.length) {
+          nexus?.emit?.('FIRESTORE_QUEUE_FLUSHED', { before: q.length, after: remaining.length });
+        }
+        return remaining.length === 0;
+      } finally {
+        flushInProgress = false;
+      }
+    }
 
     async function refreshClaims(user) {
       if (!user) {
-        store.set('auth.user', null);
-        store.set('auth.uid', null);
-        store.set('auth.factionId', null);
-        store.set('auth.tornId', null);
-        store.set('userLevel', null);
+        store?.set?.('auth.user', null);
+        store?.set?.('auth.uid', null);
+        store?.set?.('auth.factionId', null);
+        store?.set?.('auth.tornId', null);
+        store?.set?.('userLevel', null);
         ctx.userLevel = null;
-        nexus.emit('AUTH_STATE_CHANGED', { user: null, factionId: null });
+        nexus?.emit?.('AUTH_STATE_CHANGED', { user: null, factionId: null, tornId: null });
         return;
       }
 
       let tokenResult = null;
       try {
         tokenResult = await user.getIdTokenResult(true);
-      } catch (e) {
+      } catch (_) {
         tokenResult = null;
       }
 
@@ -75,48 +162,47 @@
       const factionId = claims.factionId ? String(claims.factionId) : null;
       const tornId = claims.tornId ? String(claims.tornId) : null;
 
-      store.set('auth.user', { uid: user.uid, email: user.email || null });
-      store.set('auth.uid', user.uid);
-      store.set('auth.factionId', factionId);
-      store.set('auth.tornId', tornId);
+      store?.set?.('auth.user', { uid: user.uid, email: user.email || null });
+      store?.set?.('auth.uid', user.uid);
+      store?.set?.('auth.factionId', factionId);
+      store?.set?.('auth.tornId', tornId);
 
-      // Auth-to-Store Bridge: Fetch user document from Firestore and populate userLevel
+      // Auth-to-Store Bridge: best-effort user doc read (non-fatal if Firestore is down)
       if (fs && user.uid) {
         try {
           const userDocRef = fs.collection('users').doc(user.uid);
           const userDoc = await userDocRef.get();
-
           if (userDoc.exists) {
-            const userData = userDoc.data();
-            const userLevel = userData && userData.level ? userData.level : null;
-
+            const userData = userDoc.data() || {};
+            const userLevel = userData.level ? userData.level : null;
             if (userLevel) {
-              store.set('userLevel', userLevel);
+              store?.set?.('userLevel', userLevel);
               ctx.userLevel = userLevel;
               log(`[Firebase] User level loaded: ${userLevel}`);
             }
-          } else {
-            log('[Firebase] User document not found in Firestore');
           }
         } catch (e) {
-          log('[Firebase] Failed to fetch user document:', e.message);
+          // Keep app functional even if Firestore is down
+          log('[Firebase] User doc read failed (non-fatal):', e && e.message ? e.message : e);
         }
       }
 
-      nexus.emit('AUTH_STATE_CHANGED', { user: { uid: user.uid }, factionId, tornId });
+      nexus?.emit?.('AUTH_STATE_CHANGED', { user: { uid: user.uid }, factionId, tornId });
     }
 
     function setupConnectivity() {
       if (!db) return;
       try {
         const connRef = db.ref('.info/connected');
-        unsubConn = connRef.on('value', (snap) => {
+        const handler = (snap) => {
           const isConn = !!snap.val();
           if (isConn === connected) return;
           connected = isConn;
-          store.set('firebase.connected', connected);
-          nexus.emit(connected ? 'FIREBASE_CONNECTED' : 'FIREBASE_DISCONNECTED', { connected });
-        });
+          store?.set?.('firebase.connected', connected);
+          nexus?.emit?.(connected ? 'FIREBASE_CONNECTED' : 'FIREBASE_DISCONNECTED', { connected });
+        };
+        connRef.on('value', handler);
+        unsubConn = handler;
       } catch (e) {
         log('[Firebase] Connectivity monitor failed:', e);
       }
@@ -124,11 +210,11 @@
 
     function teardownConnectivity() {
       if (!db || !unsubConn) return;
-      try {
-        db.ref('.info/connected').off('value', unsubConn);
-      } catch (_) {}
+      try { db.ref('.info/connected').off('value', unsubConn); } catch (_) {}
       unsubConn = null;
+    }
 
+    function teardownFirestoreMonitoring() {
       if (firestoreTestInterval) {
         clearInterval(firestoreTestInterval);
         firestoreTestInterval = null;
@@ -137,25 +223,27 @@
 
     async function testFirestoreConnection() {
       if (!fs) return false;
-
       try {
-        // Try to read from a test collection
+        // lightweight read
         const testRef = fs.collection('_connection_test').doc('ping');
         await testRef.get();
 
         if (!firestoreReady) {
           firestoreReady = true;
-          store.set('firebase.firestoreReady', true);
-          nexus.emit('FIRESTORE_CONNECTED', { ready: true });
+          store?.set?.('firebase.firestoreReady', true);
+          nexus?.emit?.('FIRESTORE_CONNECTED', { ready: true });
           log('[Firebase] Firestore connection established');
         }
+
+        // once it's reachable, try flushing queued writes
+        await flushQueue();
         return true;
       } catch (e) {
         if (firestoreReady) {
           firestoreReady = false;
-          store.set('firebase.firestoreReady', false);
-          nexus.emit('FIRESTORE_DISCONNECTED', { error: e.message });
-          log('[Firebase] Firestore connection lost:', e.message);
+          store?.set?.('firebase.firestoreReady', false);
+          nexus?.emit?.('FIRESTORE_DISCONNECTED', { error: e && e.message ? e.message : String(e) });
+          log('[Firebase] Firestore connection lost:', e && e.message ? e.message : e);
         }
         return false;
       }
@@ -163,42 +251,23 @@
 
     function setupFirestoreMonitoring() {
       if (!fs) return;
-
-      // Test connection immediately
+      teardownFirestoreMonitoring();
+      // immediate test (best-effort)
       testFirestoreConnection();
-
-      // Test periodically (every 30 seconds)
-      if (firestoreTestInterval) clearInterval(firestoreTestInterval);
-      firestoreTestInterval = setInterval(() => {
-        testFirestoreConnection();
-      }, 30000);
+      // periodic test (30s)
+      firestoreTestInterval = setInterval(() => { testFirestoreConnection(); }, 30000);
     }
 
     function initFirebase() {
       try {
         ensureFirebaseCompat();
       } catch (e) {
-        log('[Firebase] ========================================');
-        log('[Firebase] FIREBASE SDK NOT LOADED');
-        log('[Firebase] This is non-fatal - script will continue in offline mode');
-        log('[Firebase] Error:', e.message);
-        log('[Firebase] ========================================');
-        store.set('firebase.initialized', false);
-        store.set('firebase.available', false);
-        nexus.emit('FIREBASE_UNAVAILABLE', { error: e.message });
+        log('[Firebase] Firebase SDK NOT LOADED (offline mode):', e.message);
+        store?.set?.('firebase.initialized', false);
+        store?.set?.('firebase.available', false);
+        nexus?.emit?.('FIREBASE_UNAVAILABLE', { error: e.message });
         return false;
       }
-
-      log('[Firebase] ========================================');
-      log('[Firebase] INITIALIZING FIREBASE');
-      log('[Firebase] ========================================');
-      log('[Firebase] SDK Status:', {
-        hasFirebase: typeof window.firebase !== 'undefined',
-        hasAuth: typeof window.firebase?.auth === 'function',
-        hasDatabase: typeof window.firebase?.database === 'function',
-        hasFirestore: typeof window.firebase?.firestore === 'function',
-        hasFunctions: typeof window.firebase?.app === 'function'
-      });
 
       try {
         if (!window.firebase.apps || window.firebase.apps.length === 0) {
@@ -211,112 +280,70 @@
 
         auth = window.firebase.auth();
         db = window.firebase.database();
-        log('[Firebase] ✓ Auth and Database initialized');
-      } catch (initError) {
-        log('[Firebase] ========================================');
-        log('[Firebase] FIREBASE INITIALIZATION FAILED');
-        log('[Firebase] This is non-fatal - script will continue in offline mode');
-        log('[Firebase] Error:', initError.message);
-        log('[Firebase] ========================================');
-        store.set('firebase.initialized', false);
-        store.set('firebase.available', false);
-        nexus.emit('FIREBASE_UNAVAILABLE', { error: initError.message });
+      } catch (e) {
+        log('[Firebase] Firebase initialization failed (offline mode):', e.message);
+        store?.set?.('firebase.initialized', false);
+        store?.set?.('firebase.available', false);
+        nexus?.emit?.('FIREBASE_UNAVAILABLE', { error: e.message });
         return false;
       }
 
-      // Initialize Firestore with proper error handling and settings
+      // Firestore init (userscript safe)
       try {
         if (typeof window.firebase.firestore === 'function') {
           fs = window.firebase.firestore();
 
-          // CRITICAL: Apply Firestore settings BEFORE any usage
-          // This must be done exactly ONCE and BEFORE any Firestore operations
-          try {
-            log('[Firebase] Applying Firestore settings...');
-            fs.settings({
-              // Use long-polling instead of WebSocket for userscript compatibility
-              // WebSocket connections often fail in Tampermonkey/Greasemonkey environments
-              experimentalForceLongPolling: true,
-
-              // Ignore undefined properties to prevent write errors
-              ignoreUndefinedProperties: true
-            });
-            log('[Firebase] ✓ Firestore settings applied successfully');
-            log('[Firebase]   - Long-polling transport: ENABLED (userscript-safe)');
-            log('[Firebase]   - Ignore undefined properties: ENABLED');
-          } catch (settingsErr) {
-            // Settings can only be applied once. If they fail, Firestore may already be initialized.
-            log('[Firebase] WARNING: Could not apply Firestore settings:', settingsErr.message);
-            log('[Firebase] This may cause connection issues. If you see WebChannel errors, reload the page.');
+          // Apply settings ONCE. Re-applying triggers "overriding original host" warnings.
+          if (!firestoreSettingsApplied) {
+            firestoreSettingsApplied = true;
+            try {
+              fs.settings({
+                // These options are critical for userscript/mobile environments
+                experimentalAutoDetectLongPolling: true,
+                experimentalForceLongPolling: true,
+                useFetchStreams: false,
+                ignoreUndefinedProperties: true
+              });
+              log('[Firebase] ✓ Firestore settings applied (userscript-safe)');
+            } catch (settingsErr) {
+              // If Firestore already started, settings cannot be changed.
+              log('[Firebase] Firestore settings could not be applied (non-fatal):', settingsErr && settingsErr.message ? settingsErr.message : settingsErr);
+            }
           }
 
-          log('[Firebase] ✓ Firestore initialized successfully');
+          setupFirestoreMonitoring();
         } else {
-          log('[Firebase] WARNING: Firestore SDK not loaded. Please add firestore-compat.js to your userscript @require directives.');
           fs = null;
+          log('[Firebase] Firestore SDK not loaded');
         }
       } catch (e) {
-        log('[Firebase] Firestore initialization failed:', e.message);
         fs = null;
+        log('[Firebase] Firestore init failed (non-fatal):', e && e.message ? e.message : e);
       }
 
-      // CRITICAL: Initialize Functions with us-central1 region
-      // Firebase compat SDK requires: firebase.app().functions('us-central1')
-      // This MUST match the server deployment region
+      // Functions init
       try {
-        // Validate Functions SDK is available
-        if (!window.firebase.app) {
-          throw new Error('firebase.app() is not available - Functions SDK not loaded');
-        }
-        if (typeof window.firebase.app().functions !== 'function') {
-          throw new Error('firebase.app().functions() is not available - Functions SDK not loaded');
-        }
-
-        // Initialize with explicit region
+        if (!window.firebase.app) throw new Error('firebase.app() missing');
+        if (typeof window.firebase.app().functions !== 'function') throw new Error('functions() missing');
         fn = window.firebase.app().functions('us-central1');
-
-        if (!fn) {
-          throw new Error('Functions instance is null after initialization');
-        }
-        if (typeof fn.httpsCallable !== 'function') {
-          throw new Error('Functions instance missing httpsCallable method');
-        }
-
-        log('[Firebase] ✓ Functions initialized successfully');
-        log('[Firebase] ✓ Region: us-central1 (CRITICAL: must match server deployment)');
-        log('[Firebase] ✓ httpsCallable method available:', typeof fn.httpsCallable);
       } catch (e) {
-        log('[Firebase] ========================================');
-        log('[Firebase] CRITICAL ERROR: Functions initialization failed!');
-        log('[Firebase] Error:', e.message);
-        log('[Firebase] This will prevent authentication from working.');
-        log('[Firebase] Please ensure functions-compat.js is loaded in @require');
-        log('[Firebase] ========================================');
         fn = null;
+        log('[Firebase] Functions init failed:', e && e.message ? e.message : e);
       }
 
       setupConnectivity();
 
-      // Setup Firestore monitoring if available
-      if (fs) {
-        setupFirestoreMonitoring();
-      }
-
       if (!unsubAuth && auth) {
         try {
-          unsubAuth = auth.onAuthStateChanged((user) => {
-            refreshClaims(user);
-          });
-        } catch (authErr) {
-          log('[Firebase] WARNING: Could not set up auth state listener:', authErr.message);
+          unsubAuth = auth.onAuthStateChanged((user) => { refreshClaims(user); });
+        } catch (e) {
+          log('[Firebase] Auth listener failed:', e && e.message ? e.message : e);
         }
       }
 
-      store.set('firebase.initialized', true);
-      store.set('firebase.available', true);
-      log('[Firebase] ========================================');
-      log('[Firebase] ✓ FIREBASE FULLY INITIALIZED');
-      log('[Firebase] ========================================');
+      store?.set?.('firebase.initialized', true);
+      store?.set?.('firebase.available', true);
+      store?.set?.('firebase.fsQueueSize', getQueue().length);
       return true;
     }
 
@@ -324,108 +351,36 @@
       const key = safeStr(apiKey);
       if (!key) throw new Error('Missing Torn API key');
 
-      if (!fn) {
-        log('[Firebase] Functions not initialized, attempting initialization...');
-        initFirebase();
-      }
-
-      if (!fn) {
-        throw new Error('Firebase Functions failed to initialize. Functions SDK may not be loaded. Check console for details.');
-      }
-
-      log('[Firebase] ===== CALLING authenticateWithTorn =====');
-      log('[Firebase] ===== ENHANCED DIAGNOSTICS =====');
-      log('[Firebase] 1. Firebase SDK Status:', {
-        firebaseLoaded: typeof window.firebase !== 'undefined',
-        firebaseVersion: window.firebase?.SDK_VERSION || 'unknown',
-        hasApp: typeof window.firebase?.app === 'function',
-        hasFunctions: typeof window.firebase?.functions === 'function'
-      });
-      log('[Firebase] 2. Functions Instance Status:', {
-        functionInstanceExists: !!fn,
-        functionInstanceType: typeof fn,
-        hasHttpsCallable: !!(fn && typeof fn.httpsCallable === 'function'),
-        httpscallableType: typeof fn?.httpsCallable
-      });
-      log('[Firebase] 3. Region Configuration:', {
-        targetRegion: 'us-central1',
-        note: 'MUST match Cloud Run deployment region'
-      });
-      log('[Firebase] 4. Request Details:', {
-        apiKeyLength: key.length,
-        apiKeyFormat: /^[a-zA-Z0-9]{16}$/.test(key) ? 'valid' : 'invalid',
-        payload: { apiKey: '<redacted>' },
-        method: 'Firebase SDK httpsCallable (auto-wraps in { data: {...} })'
-      });
+      if (!fn) initFirebase();
+      if (!fn) throw new Error('Firebase Functions not available');
 
       try {
-        // Validate callable is available before calling
-        if (typeof fn.httpsCallable !== 'function') {
-          throw new Error('fn.httpsCallable is not a function. Functions SDK may be corrupted.');
-        }
-
         const callable = fn.httpsCallable('authenticateWithTorn');
-        log('[Firebase] ✓ Created httpsCallable for authenticateWithTorn');
-        log('[Firebase] ✓ Callable type:', typeof callable);
-        log('[Firebase] ✓ Invoking callable with payload: { apiKey: <' + key.length + ' chars> }');
-
         const res = await callable({ apiKey: key });
-
-        log('[Firebase] ===== CLOUD FUNCTION RESPONSE =====');
-        log('[Firebase] Response received:', {
-          hasData: !!res.data,
-          dataKeys: res.data ? Object.keys(res.data) : [],
-          success: res.data?.success,
-          hasToken: !!(res.data?.token),
-          tokenLength: res.data?.token ? String(res.data.token).length : 0,
-          playerId: res.data?.playerId || 'N/A',
-          playerName: res.data?.playerName || 'N/A',
-          factionId: res.data?.factionId || 'N/A',
-          factionName: res.data?.factionName || 'N/A'
-        });
 
         const token = res && res.data && res.data.token ? String(res.data.token) : '';
         if (!token) {
-          const errorMsg = res && res.data && res.data.error ? res.data.error : 'Unknown error';
-          log('[Firebase] ERROR: No token received from cloud function');
-          log('[Firebase] Full response object:', res);
-          throw new Error('Authentication failed: ' + errorMsg);
+          const err = res && res.data && res.data.error ? String(res.data.error) : 'Unknown error';
+          nexus?.emit?.('AUTH_ERROR', { error: err });
+          throw new Error('Authentication failed: ' + err);
         }
 
-        log('[Firebase] ✓ Token received (length: ' + token.length + ' chars)');
-        log('[Firebase] ✓ Player info: ' + (res.data.playerName || 'N/A') + ' [ID: ' + (res.data.playerId || 'N/A') + ']');
-        log('[Firebase] ✓ Faction: ' + (res.data.factionName || 'None') + ' [ID: ' + (res.data.factionId || 'N/A') + ']');
-        log('[Firebase] ✓ Signing in with custom token...');
-
-        // Wait for auth state to be fully established
+        // Wait for auth state
         const authPromise = new Promise((resolve, reject) => {
-          const timeout = setTimeout(() => {
-            reject(new Error('Authentication timeout - user state not established'));
-          }, 10000); // 10 second timeout
-
-          const unsubscribe = auth.onAuthStateChanged((user) => {
+          const t = setTimeout(() => reject(new Error('Authentication timeout')), 10000);
+          const unsub = auth.onAuthStateChanged((user) => {
             if (user) {
-              clearTimeout(timeout);
-              unsubscribe();
-              log('[Firebase] ✓ Auth state changed, user authenticated:', user.uid);
+              clearTimeout(t);
+              try { unsub(); } catch (_) {}
               resolve(user);
             }
           });
         });
 
         await auth.signInWithCustomToken(token);
-        log('[Firebase] ✓ signInWithCustomToken completed, waiting for auth state...');
+        const user = await authPromise;
 
-        const user = await authPromise; // Wait for the auth state to propagate
-
-        log('[Firebase] ===== AUTHENTICATION SUCCESSFUL =====');
-        log('[Firebase] ✓ Authenticated user UID:', user.uid);
-        log('[Firebase] ✓ Player: ' + (res.data.playerName || user.uid));
-        log('[Firebase] ✓ Faction: ' + (res.data.factionName || 'None'));
-        log('[Firebase] ✓ Database access granted');
-
-        // Emit success event with user info for UI
-        nexus.emit('AUTH_SUCCESS', {
+        nexus?.emit?.('AUTH_SUCCESS', {
           uid: user.uid,
           playerId: res.data?.playerId,
           playerName: res.data?.playerName,
@@ -434,67 +389,10 @@
         });
 
         return true;
-      } catch (error) {
-        log('[Firebase] ===== AUTHENTICATION ERROR =====');
-        log('[Firebase] ===== DETAILED ERROR OBJECT =====');
-        log('[Firebase] Error constructor:', error.constructor?.name || 'unknown');
-        log('[Firebase] Error code:', error.code || 'none');
-        log('[Firebase] Error message:', error.message || 'none');
-        log('[Firebase] Error name:', error.name || 'none');
-        log('[Firebase] All error fields:', {
-          code: error.code,
-          message: error.message,
-          name: error.name,
-          details: error.details,
-          customData: error.customData,
-          serverResponse: error.serverResponse,
-          status: error.status,
-          statusCode: error.statusCode,
-          stack: error.stack?.substring(0, 500)
-        });
-        log('[Firebase] Full error object keys:', Object.keys(error));
-        log('[Firebase] Error toString:', String(error));
-
-        // Extract meaningful error message from HttpsError
-        let errorMessage = 'Authentication failed';
-        let troubleshooting = '';
-
-        if (error.code === 'functions/not-found') {
-          errorMessage = 'Cloud function not found';
-          troubleshooting = 'Ensure authenticateWithTorn is deployed to us-central1 region.';
-        } else if (error.code === 'functions/internal') {
-          errorMessage = 'Server error: ' + (error.message || 'internal');
-          troubleshooting = 'Check Cloud Run logs for server-side errors. The function may have thrown an exception.';
-        } else if (error.code === 'functions/invalid-request') {
-          errorMessage = 'Invalid request format';
-          troubleshooting = 'The callable function received a non-callable request. Ensure you are using httpsCallable() not fetch/xhr.';
-        } else if (error.code === 'functions/unauthenticated') {
-          errorMessage = 'Authentication required';
-          troubleshooting = 'Check your API key.';
-        } else if (error.code === 'functions/permission-denied') {
-          errorMessage = 'Permission denied';
-          troubleshooting = 'Verify your access rights.';
-        } else if (error.code === 'functions/invalid-argument') {
-          errorMessage = error.message || 'Invalid API key format';
-          troubleshooting = 'Check your Torn API key is exactly 16 alphanumeric characters.';
-        } else if (error.code === 'functions/deadline-exceeded') {
-          errorMessage = 'Request timeout';
-          troubleshooting = 'Try again. The server may be slow or unreachable.';
-        } else if (error.code === 'functions/unavailable') {
-          errorMessage = 'Service temporarily unavailable';
-          troubleshooting = 'Try again later. The function may be deploying.';
-        } else if (error.message) {
-          errorMessage = error.message;
-        } else {
-          errorMessage = 'Unknown error: ' + String(error);
-        }
-
-        log('[Firebase] Human-readable error:', errorMessage);
-        if (troubleshooting) {
-          log('[Firebase] Troubleshooting:', troubleshooting);
-        }
-
-        throw new Error(errorMessage + (troubleshooting ? ' (' + troubleshooting + ')' : ''));
+      } catch (e) {
+        const msg = e && e.message ? e.message : String(e);
+        nexus?.emit?.('AUTH_ERROR', { error: msg });
+        throw e;
       }
     }
 
@@ -503,130 +401,180 @@
       await auth.signOut();
     }
 
-    function isConnected() {
-      return !!connected;
-    }
+    function isConnected() { return !!connected; }
+    function isFirestoreReady() { return !!firestoreReady && !!fs; }
+    function getCurrentUser() { return auth ? auth.currentUser : null; }
 
-    function getCurrentUser() {
-      return auth ? auth.currentUser : null;
-    }
+    function authFacade() { if (!auth) initFirebase(); return auth; }
+    function rtdbFacade() { if (!db) initFirebase(); return db; }
+    function firestoreFacade() { if (!fs) initFirebase(); return fs; }
 
-    function ref(path) {
-      if (!db) initFirebase();
-      return db.ref(path);
-    }
+    function ref(path) { if (!db) initFirebase(); return db.ref(path); }
 
-    function isFirestoreReady() {
-      return !!firestoreReady && !!fs;
-    }
-
+    // ========= Firestore convenience with offline queue =========
     function collection(path) {
-      if (!fs) {
-        initFirebase();
-        if (!fs) throw new Error('Firestore not available. Please load firestore-compat.js');
-      }
+      if (!fs) initFirebase();
+      if (!fs) throw new Error('Firestore not available');
       return fs.collection(path);
     }
 
     function doc(collectionPath, docId) {
-      if (!fs) {
-        initFirebase();
-        if (!fs) throw new Error('Firestore not available. Please load firestore-compat.js');
-      }
+      if (!fs) initFirebase();
+      if (!fs) throw new Error('Firestore not available');
       return fs.collection(collectionPath).doc(docId);
     }
 
     async function getDoc(collectionPath, docId) {
-      if (!fs) {
-        initFirebase();
-        if (!fs) throw new Error('Firestore not available. Please load firestore-compat.js');
+      if (!fs) initFirebase();
+      if (!fs) return null;
+      try {
+        const snap = await fs.collection(collectionPath).doc(docId).get();
+        return snap.exists ? { id: snap.id, ...snap.data() } : null;
+      } catch (_) {
+        return null;
       }
-      const docRef = fs.collection(collectionPath).doc(docId);
-      const snapshot = await docRef.get();
-      return snapshot.exists ? { id: snapshot.id, ...snapshot.data() } : null;
     }
 
     async function setDoc(collectionPath, docId, data, options = {}) {
-      if (!fs) {
-        initFirebase();
-        if (!fs) throw new Error('Firestore not available. Please load firestore-compat.js');
+      if (!fs) initFirebase();
+      const payload = { c: String(collectionPath), id: String(docId), data: data || {}, merge: !!options.merge };
+      if (!fs || !firestoreReady) {
+        enqueueOp({ t: 'set', p: payload, at: nowIso() });
+        return { queued: true };
       }
-      const docRef = fs.collection(collectionPath).doc(docId);
-      if (options.merge) {
-        await docRef.set(data, { merge: true });
-      } else {
-        await docRef.set(data);
+      try {
+        const r = fs.collection(payload.c).doc(payload.id);
+        if (payload.merge) await r.set(payload.data, { merge: true });
+        else await r.set(payload.data);
+        return { queued: false };
+      } catch (e) {
+        enqueueOp({ t: 'set', p: payload, at: nowIso() });
+        return { queued: true };
       }
-      return true;
     }
 
     async function updateDoc(collectionPath, docId, data) {
-      if (!fs) {
-        initFirebase();
-        if (!fs) throw new Error('Firestore not available. Please load firestore-compat.js');
+      if (!fs) initFirebase();
+      const payload = { c: String(collectionPath), id: String(docId), data: data || {} };
+      if (!fs || !firestoreReady) {
+        enqueueOp({ t: 'update', p: payload, at: nowIso() });
+        return { queued: true };
       }
-      const docRef = fs.collection(collectionPath).doc(docId);
-      await docRef.update(data);
-      return true;
+      try {
+        await fs.collection(payload.c).doc(payload.id).update(payload.data);
+        return { queued: false };
+      } catch (e) {
+        enqueueOp({ t: 'update', p: payload, at: nowIso() });
+        return { queued: true };
+      }
     }
 
     async function deleteDoc(collectionPath, docId) {
-      if (!fs) {
-        initFirebase();
-        if (!fs) throw new Error('Firestore not available. Please load firestore-compat.js');
+      if (!fs) initFirebase();
+      const payload = { c: String(collectionPath), id: String(docId) };
+      if (!fs || !firestoreReady) {
+        enqueueOp({ t: 'delete', p: payload, at: nowIso() });
+        return { queued: true };
       }
-      const docRef = fs.collection(collectionPath).doc(docId);
-      await docRef.delete();
-      return true;
+      try {
+        await fs.collection(payload.c).doc(payload.id).delete();
+        return { queued: false };
+      } catch (e) {
+        enqueueOp({ t: 'delete', p: payload, at: nowIso() });
+        return { queued: true };
+      }
     }
 
     async function queryCollection(collectionPath, queryFn) {
-      if (!fs) {
-        initFirebase();
-        if (!fs) throw new Error('Firestore not available. Please load firestore-compat.js');
+      if (!fs) initFirebase();
+      if (!fs) return [];
+      try {
+        let q = fs.collection(collectionPath);
+        if (typeof queryFn === 'function') q = queryFn(q);
+        const snap = await q.get();
+        return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      } catch (_) {
+        return [];
       }
-      let query = fs.collection(collectionPath);
-      if (typeof queryFn === 'function') {
-        query = queryFn(query);
-      }
-      const snapshot = await query.get();
-      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     }
 
-    function onSnapshot(collectionOrDocPath, docId, callback, errorCallback) {
+    // Listener with fallback: if onSnapshot fails due to transport, fallback to polling .get()
+    function onSnapshot(collectionOrDocPath, docId, callback, errorCallback, opts = {}) {
+      if (!fs) initFirebase();
       if (!fs) {
-        initFirebase();
-        if (!fs) {
-          if (errorCallback) errorCallback(new Error('Firestore not available'));
-          return () => {};
-        }
+        if (typeof errorCallback === 'function') errorCallback(new Error('Firestore not available'));
+        return () => {};
       }
 
-      let ref;
-      if (docId) {
-        ref = fs.collection(collectionOrDocPath).doc(docId);
-      } else {
-        ref = fs.collection(collectionOrDocPath);
-      }
+      const pollMs = Math.max(2000, Number(opts.pollMs || 8000));
+      let stop = false;
+      let timer = null;
+      let unsub = null;
 
-      return ref.onSnapshot(
-        (snapshot) => {
-          if (snapshot.docs) {
-            // Collection snapshot
-            const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            callback(docs);
-          } else {
-            // Document snapshot
-            const data = snapshot.exists ? { id: snapshot.id, ...snapshot.data() } : null;
-            callback(data);
+      function startPolling(refObj, isCollection) {
+        if (timer) clearInterval(timer);
+        timer = setInterval(async () => {
+          if (stop) return;
+          try {
+            const snap = await refObj.get();
+            if (isCollection) {
+              const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+              callback(docs);
+            } else {
+              const data = snap.exists ? { id: snap.id, ...snap.data() } : null;
+              callback(data);
+            }
+          } catch (e) {
+            if (typeof errorCallback === 'function') errorCallback(e);
           }
-        },
-        errorCallback || ((err) => log('[Firebase] Snapshot error:', err))
-      );
+        }, pollMs);
+      }
+
+      let refObj;
+      let isCollection = false;
+
+      if (docId) {
+        refObj = fs.collection(collectionOrDocPath).doc(docId);
+        isCollection = false;
+      } else {
+        refObj = fs.collection(collectionOrDocPath);
+        isCollection = true;
+      }
+
+      try {
+        unsub = refObj.onSnapshot(
+          (snap) => {
+            if (snap && snap.docs) {
+              const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+              callback(docs);
+            } else {
+              const data = snap.exists ? { id: snap.id, ...snap.data() } : null;
+              callback(data);
+            }
+          },
+          (err) => {
+            // fallback to polling if transport breaks
+            if (typeof errorCallback === 'function') errorCallback(err);
+            startPolling(refObj, isCollection);
+          }
+        );
+      } catch (e) {
+        if (typeof errorCallback === 'function') errorCallback(e);
+        startPolling(refObj, isCollection);
+      }
+
+      return function unsubscribe() {
+        stop = true;
+        try { if (typeof unsub === 'function') unsub(); } catch (_) {}
+        if (timer) {
+          clearInterval(timer);
+          timer = null;
+        }
+      };
     }
 
     const firebaseFacade = {
-      version: '5.0.0',
+      version: '5.0.1',
       firebaseConfig,
       init: initFirebase,
       authenticateWithTorn,
@@ -634,11 +582,12 @@
       isConnected,
       isFirestoreReady,
       getCurrentUser,
-      auth: function () { if (!auth) initFirebase(); return auth; },
-      rtdb: function () { if (!db) initFirebase(); return db; },
-      firestore: function () { if (!fs) initFirebase(); return fs; },
+      auth: authFacade,
+      rtdb: rtdbFacade,
+      firestore: firestoreFacade,
       ref,
-      // Firestore convenience methods
+
+      // Firestore convenience
       collection,
       doc,
       getDoc,
@@ -646,16 +595,20 @@
       updateDoc,
       deleteDoc,
       queryCollection,
-      onSnapshot
+      onSnapshot,
+
+      // Queue utilities
+      flushQueue
     };
 
     function destroy() {
       teardownConnectivity();
+      teardownFirestoreMonitoring();
       if (typeof unsubAuth === 'function') {
         try { unsubAuth(); } catch (_) {}
       }
       unsubAuth = null;
-      store.set('firebase.initialized', false);
+      store?.set?.('firebase.initialized', false);
     }
 
     ctx.firebase = firebaseFacade;
