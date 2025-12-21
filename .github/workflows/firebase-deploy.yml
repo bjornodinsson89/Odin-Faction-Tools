@@ -1,28 +1,17 @@
 name: Deploy to Firebase
-
 on:
   push:
-    branches:
-      - main
+    branches: [main]
     paths:
-      - "database/firestore.rules"
-      - "database/firestore.indexes.json"
-      - "database/database.rules.json"
-      - "database/firebase.json"
-      - "database/functions/**"
-      - "database/public/**"
-      - "database/.firebaserc"
+      - "database/**"
       - ".github/workflows/firebase-deploy.yml"
   workflow_dispatch:
 
 jobs:
   deploy:
-    name: Deploy to Firebase
     runs-on: ubuntu-latest
-
     env:
       FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -31,12 +20,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          # IMPORTANT:
-          # Your workflow was failing in this step due to "cache-dependency-path"
-          # pointing at a file GitHub Actions couldn't resolve.
-          # Caching is optional; removing it makes this step deterministic.
-          # Re-enable later once the path is verified in CI.
           cache: "npm"
+          cache-dependency-path: database/functions/package-lock.json
 
       - name: Auth to Google Cloud (Service Account)
         id: auth
@@ -51,42 +36,13 @@ jobs:
         working-directory: database/functions
         run: npm ci --omit=dev
 
-      - name: Deploy Firestore Rules
+      - name: Deploy Firebase (rules, indexes, db, functions, hosting)
         working-directory: database
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
-        run: firebase deploy --only firestore:rules --project "$FIREBASE_PROJECT_ID" --non-interactive
-
-      - name: Deploy Firestore Indexes
-        working-directory: database
-        env:
-          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
-        run: firebase deploy --only firestore:indexes --project "$FIREBASE_PROJECT_ID" --non-interactive
-
-      - name: Deploy Realtime Database Rules
-        working-directory: database
-        env:
-          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
-        run: firebase deploy --only database --project "$FIREBASE_PROJECT_ID" --non-interactive
-
-      - name: Deploy Firebase Functions
-        working-directory: database
-        env:
-          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
-        run: firebase deploy --only functions --project "$FIREBASE_PROJECT_ID" --non-interactive
-
-      - name: Deploy Firebase Hosting
-        working-directory: database
-        env:
-          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
-        run: firebase deploy --only hosting --project "$FIREBASE_PROJECT_ID" --non-interactive
-
-      - name: Deployment Summary
         run: |
-          echo "✅ Firebase deployment completed successfully!"
-          echo "📋 Deployed components:"
-          echo "  - Firestore security rules"
-          echo "  - Firestore indexes"
-          echo "  - Realtime Database rules"
-          echo "  - Cloud Functions"
-          echo "  - Hosting"
+          firebase deploy --only firestore:rules --project "$FIREBASE_PROJECT_ID" --non-interactive
+          firebase deploy --only firestore:indexes --project "$FIREBASE_PROJECT_ID" --non-interactive
+          firebase deploy --only database --project "$FIREBASE_PROJECT_ID" --non-interactive
+          firebase deploy --only functions --project "$FIREBASE_PROJECT_ID" --non-interactive
+          firebase deploy --only hosting --project "$FIREBASE_PROJECT_ID" --non-interactive
