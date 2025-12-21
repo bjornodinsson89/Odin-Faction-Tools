@@ -21,7 +21,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -30,10 +29,9 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: "npm"
-          cache-dependency-path: |
-            database/functions/package-lock.json
-            database/functions/package.json
+          # NOTE: Caching is intentionally disabled because setup-node fails hard
+          # if the cache-dependency-path doesn't exist at runtime (common when
+          # repo structure/workflow paths are in flux). Re-enable later once stable.
 
       - name: Auth to Google Cloud (Service Account)
         id: auth
