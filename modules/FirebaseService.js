@@ -44,7 +44,27 @@
     try { return new Date().toISOString(); } catch (_) { return String(Date.now()); }
   }
 
-  window.OdinModules.push(function FirebaseServiceModuleInit(ctx) {
+    function applyFirestoreSettingsOnce(fs, logFn) {
+    if (!fs || typeof fs.settings !== 'function') return;
+    if (window.__ODIN_FS_INIT__ === true) return;
+    try {
+      fs.settings({
+        // These options are critical for userscript/mobile environments
+        experimentalAutoDetectLongPolling: true,
+        experimentalForceLongPolling: true,
+        useFetchStreams: false,
+        ignoreUndefinedProperties: true
+      });
+      window.__ODIN_FS_INIT__ = true;
+      if (logFn) logFn('[Firebase] ✓ Firestore settings applied (userscript-safe)');
+    } catch (e) {
+      // Settings can only be applied before Firestore is used. If this fails, do not keep retrying.
+      window.__ODIN_FS_INIT__ = true;
+      if (logFn) logFn('[Firebase] WARNING: Could not apply Firestore settings:', e.message);
+    }
+  }
+
+window.OdinModules.push(function FirebaseServiceModuleInit(ctx) {
     ctx = ctx || {};
     const nexus = ctx.nexus;
     const store = ctx.store;
@@ -66,6 +86,18 @@
     // Firestore safety / offline queue
     let firestoreSettingsApplied = false;
     let firestoreTestInterval = null;
+
+    // AUTH EVENTS (UI emits; FirebaseService performs auth)
+    nexus.on('AUTH_WITH_TORN', async (payload) => {
+      const apiKey = (payload && typeof payload === 'object') ? payload.apiKey : payload;
+      try {
+        await authenticateWithTorn(apiKey);
+        nexus.emit('AUTH_WITH_TORN_SUCCESS', { ok: true });
+      } catch (e) {
+        nexus.emit('AUTH_WITH_TORN_FAILURE', { ok: false, error: (e && e.message) ? e.message : String(e) });
+      }
+    });
+
     let flushInProgress = false;
 
     const FS_QUEUE_KEY = 'firestore.queue.v1';
@@ -296,19 +328,7 @@
           // Apply settings ONCE. Re-applying triggers "overriding original host" warnings.
           if (!firestoreSettingsApplied) {
             firestoreSettingsApplied = true;
-            try {
-              fs.settings({
-                // These options are critical for userscript/mobile environments
-                experimentalAutoDetectLongPolling: true,
-                experimentalForceLongPolling: true,
-                useFetchStreams: false,
-                ignoreUndefinedProperties: true
-              });
-              log('[Firebase] ✓ Firestore settings applied (userscript-safe)');
-            } catch (settingsErr) {
-              // If Firestore already started, settings cannot be changed.
-              log('[Firebase] Firestore settings could not be applied (non-fatal):', settingsErr && settingsErr.message ? settingsErr.message : settingsErr);
-            }
+            applyFirestoreSettingsOnce(fs, log);
           }
 
           setupFirestoreMonitoring();
