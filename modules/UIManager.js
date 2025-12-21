@@ -226,9 +226,69 @@
             const currentUser = ctx.firebase.getCurrentUser && ctx.firebase.getCurrentUser();
             authUserPresent = !!currentUser;
 
-            // Show success message with user details
+            // Fetch full user profile using the API
+            if (ctx.api && typeof ctx.api.getUserProfile === 'function') {
+              try {
+                setMsg('✓ Authentication successful! Fetching your profile...', 'success');
+
+                // Get the user's Torn ID from the claims
+                const tokenResult = await currentUser.getIdTokenResult(true);
+                const tornId = tokenResult?.claims?.tornId || null;
+
+                if (tornId) {
+                  // Fetch user profile from Torn API
+                  const userProfile = await ctx.api.getUserProfile(tornId);
+
+                  if (userProfile) {
+                    log('[UIManager] User profile fetched:', userProfile.name);
+
+                    // Store user info in state
+                    const userInfo = {
+                      tornId: tornId,
+                      name: userProfile.name || 'Unknown',
+                      level: userProfile.level || 0,
+                      factionId: userProfile.faction?.faction_id || null,
+                      factionName: userProfile.faction?.faction_name || userProfile.faction?.name || null,
+                      lastAction: userProfile.last_action || null,
+                      status: userProfile.status || null,
+                      fetchedAt: Date.now()
+                    };
+
+                    // Store in ctx.store and ctx.spear state
+                    if (ctx.store) {
+                      ctx.store.set('userInfo', userInfo);
+                      ctx.store.set('userLevel', userInfo.level);
+                      ctx.store.set('userName', userInfo.name);
+                    }
+
+                    // Update Firestore user document
+                    if (ctx.firebase && typeof ctx.firebase.setDoc === 'function') {
+                      try {
+                        await ctx.firebase.setDoc('users', currentUser.uid, {
+                          tornId: userInfo.tornId,
+                          name: userInfo.name,
+                          level: userInfo.level,
+                          factionId: userInfo.factionId,
+                          factionName: userInfo.factionName,
+                          updatedAt: new Date().toISOString()
+                        }, { merge: true });
+                        log('[UIManager] User info saved to Firestore');
+                      } catch (dbErr) {
+                        log('[UIManager] Failed to save to Firestore (non-fatal):', dbErr.message);
+                      }
+                    }
+
+                    setMsg(`✓ Welcome back, ${userInfo.name}! Loading...`, 'success');
+                  }
+                }
+              } catch (profileErr) {
+                log('[UIManager] Failed to fetch profile (non-fatal):', profileErr.message);
+                setMsg('✓ Authentication successful! Loading...', 'success');
+              }
+            }
+
+            // Show success message
             const userId = currentUser?.uid || 'Unknown';
-            setMsg('✓ Authentication successful! User ID: ' + userId + ' - Loading...', 'success');
 
             // Wait a moment to show success message
             setTimeout(() => {
@@ -1286,6 +1346,18 @@
       const schedule = state.watcherSchedule || {};
       const myId = ctx.userId;
 
+      // Generate heatmap data from schedule
+      const heatmapData = {};
+      for (let day = 0; day < 7; day++) {
+        const daySchedule = schedule[day] || {};
+        for (let hour = 0; hour < 24; hour++) {
+          const key = `${day}_${hour}`;
+          // Count how many watchers are signed up for this slot
+          const slotData = daySchedule[hour];
+          heatmapData[key] = slotData ? 1 : 0; // Can be extended to count multiple watchers
+        }
+      }
+
       return `
         <div class="odin-card">
           <div class="odin-card-header">
@@ -1333,7 +1405,7 @@
             <div class="odin-card-title">🔥 Activity Heatmap</div>
           </div>
           <div class="odin-heatmap">
-            ${renderHeatmap(schedule.heatmap || {})}
+            ${renderHeatmap(heatmapData)}
           </div>
         </div>
       `;
@@ -1726,6 +1798,19 @@
       if (targetArray.length === 0) {
         return '<div class="odin-empty"><div class="odin-empty-icon">🎯</div>No targets added</div>';
       }
+
+      // Sort by Freki score (highest first), then by name
+      targetArray.sort((a, b) => {
+        const scoreA = a[1].frekiScore || 0;
+        const scoreB = b[1].frekiScore || 0;
+        if (scoreB !== scoreA) {
+          return scoreB - scoreA; // Descending score
+        }
+        // If scores are equal, sort by name
+        const nameA = (a[1].targetName || a[0]).toLowerCase();
+        const nameB = (b[1].targetName || b[0]).toLowerCase();
+        return nameA.localeCompare(nameB);
+      });
 
       return targetArray.map(([targetId, target]) => {
         const isClaimed = claims[targetId];
@@ -2245,6 +2330,79 @@
       // Subscribe to state changes
       nexus.on?.('STATE_CHANGED', () => {
         if (isVisible) renderTabContent(activeTab);
+      });
+
+      // Listen for target-specific events to update UI immediately
+      nexus.on?.('TARGET_ADDED', (payload) => {
+        log('[UIManager] Target added:', payload?.targetId);
+        if (isVisible && activeTab === 'targets') {
+          renderTabContent('targets');
+        }
+        if (payload?.targetId) {
+          showToast(`Target ${payload.targetId} added!`, 'success');
+        }
+      });
+
+      nexus.on?.('TARGET_INFO_UPDATED', (payload) => {
+        log('[UIManager] Target info updated:', payload?.targetId);
+        if (isVisible && activeTab === 'targets') {
+          renderTabContent('targets');
+        }
+      });
+
+      nexus.on?.('TARGET_REMOVED', (payload) => {
+        log('[UIManager] Target removed:', payload?.targetId);
+        if (isVisible && activeTab === 'targets') {
+          renderTabContent('targets');
+        }
+        if (payload?.targetId) {
+          showToast(`Target ${payload.targetId} removed`, 'info');
+        }
+      });
+
+      nexus.on?.('TARGET_CLAIMED', (payload) => {
+        log('[UIManager] Target claimed:', payload?.targetId);
+        if (isVisible && (activeTab === 'targets' || activeTab === 'warRoom')) {
+          renderTabContent(activeTab);
+        }
+        if (payload?.targetId) {
+          showToast(`Target ${payload.targetId} claimed!`, 'success');
+        }
+      });
+
+      nexus.on?.('TARGET_UNCLAIMED', (payload) => {
+        log('[UIManager] Target unclaimed:', payload?.targetId);
+        if (isVisible && (activeTab === 'targets' || activeTab === 'warRoom')) {
+          renderTabContent(activeTab);
+        }
+        if (payload?.targetId) {
+          showToast(`Target ${payload.targetId} released`, 'info');
+        }
+      });
+
+      nexus.on?.('TARGET_ALREADY_EXISTS', (payload) => {
+        if (payload?.targetId) {
+          showToast(`Target ${payload.targetId} already exists`, 'warning');
+        }
+      });
+
+      nexus.on?.('PROFILE_DATA_LOADED', (payload) => {
+        log('[UIManager] Profile data loaded:', payload?.playerId);
+        // Re-render if we're on targets tab to show updated info
+        if (isVisible && activeTab === 'targets') {
+          renderTabContent('targets');
+        }
+      });
+
+      nexus.on?.('SLOT_SIGNED_UP', (payload) => {
+        log('[UIManager] Slot signed up:', payload);
+        if (isVisible && activeTab === 'schedule') {
+          renderTabContent('schedule');
+        }
+        if (payload?.day !== undefined && payload?.hour !== undefined) {
+          const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+          showToast(`Signed up for ${days[payload.day]} at ${String(payload.hour).padStart(2, '0')}:00`, 'success');
+        }
       });
 
       // Update connection status
