@@ -16,11 +16,6 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/factions/$(factionId)/roles/$(userId)).data.role;
     }
 
-    function hasRole(factionId, role) {
-      let userRole = getUserRole(factionId, request.auth.uid);
-      return userRole == role;
-    }
-
     function hasMinRole(factionId, minRole) {
       let userRole = getUserRole(factionId, request.auth.uid);
       // Role hierarchy: Developer > Leader > Admin > Member

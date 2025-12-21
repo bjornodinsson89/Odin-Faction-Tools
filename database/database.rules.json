@@ -6,11 +6,11 @@
     "factions": {
       "$factionId": {
         ".read": "auth != null && auth.token.factionId === $factionId",
-        ".write": false,
+        ".write": "auth != null && auth.token.factionId === $factionId",
         "roles": {
           "$uid": {
             ".read": "auth != null && auth.token.factionId === $factionId",
-            ".write": false,
+            ".write": "auth != null && auth.token.factionId === $factionId && (root.child('factions/'+$factionId+'/roles/'+auth.uid).val() === 'Developer' || root.child('factions/'+$factionId+'/roles/'+auth.uid).val() === 'Leader' || root.child('factions/'+$factionId+'/roles/'+auth.uid).val() === 'Admin')",
             ".validate": "newData.isString() && (newData.val() === 'Developer' || newData.val() === 'Leader' || newData.val() === 'Admin' || newData.val() === 'Member')"
           }
         },
