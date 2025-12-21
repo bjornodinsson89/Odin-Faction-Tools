@@ -2072,6 +2072,17 @@ const onlineMembers = Object.values(presence).filter(p => p.status === 'online')
       showToast,
       refresh: () => renderTabContent(activeTab)
     };
+
+    // ============================================
+    // PAGE CONTEXT BRIDGE
+    // ============================================
+    (function exposeOdinUIToPage() {
+      try {
+        const uw = (typeof unsafeWindow !== 'undefined' && unsafeWindow) ? unsafeWindow : window;
+        uw.OdinUI = window.OdinUI;
+      } catch (_) {}
+    })();
+
     // ============================================
     // PAGE-CONTEXT BRIDGE
     // ============================================
@@ -2183,6 +2194,10 @@ const onlineMembers = Object.values(presence).filter(p => p.status === 'online')
             // ignore
         }
         window.OdinUI = null;
+      try {
+        const uw = (typeof unsafeWindow !== 'undefined' && unsafeWindow) ? unsafeWindow : window;
+        if (uw && uw.OdinUI) uw.OdinUI = null;
+      } catch (_) {}
       log('[UIManager] Destroyed');
     }
 
