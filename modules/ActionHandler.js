@@ -2,9 +2,9 @@
  * Odin Tools - Action Handler Module
  * Handles user actions like adding targets, claiming targets, notes, etc.
  * OFFLINE-TOLERANT:
- *  - Always updates local storage immediately
- *  - Mirrors storage state into ctx.store so UI updates instantly
- *  - Emits Nexus events for other modules
+ * Always updates local storage immediately
+ * Mirrors storage state into ctx.store so UI updates instantly
+ * Emits Nexus events for other modules
  * Version: 1.1.0
  * Author: BjornOdinsson89
  */
@@ -61,38 +61,62 @@
     // ADD TARGET HANDLER
     // ============================================
     
-    function mergeProfileIntoTarget(targetObj, profileData) {
-        if (!targetObj || typeof targetObj !== 'object' || !profileData || typeof profileData !== 'object') return;
-        // Core identity
-        if (typeof profileData.name === 'string' && profileData.name) targetObj.targetName = profileData.name;
-        if (typeof profileData.level === 'number') targetObj.level = profileData.level;
-        if (profileData.faction && typeof profileData.faction.faction_name === 'string' && profileData.faction.faction_name) {
-            targetObj.factionName = profileData.faction.faction_name;
-        }
+    function mergeProfileIntoTarget(targetObj, userData) {
+      if (!targetObj || !userData || typeof userData !== 'object') return targetObj;
 
-        // Status (hospital / jail / traveling / okay) + timers
-        const st = profileData.status && typeof profileData.status === 'object' ? profileData.status : {};
-        if (typeof st.state === 'string') targetObj.statusState = st.state;
-        if (typeof st.description === 'string') targetObj.statusDescription = st.description;
-        if (typeof st.until === 'number') targetObj.statusUntil = st.until;
+      // Torn API responses can vary by selections. Normalize.
+      const profile = (userData.profile && typeof userData.profile === 'object') ? userData.profile : null;
+      const basic = (userData.basic && typeof userData.basic === 'object') ? userData.basic : null;
+      const bars = (userData.bars && typeof userData.bars === 'object') ? userData.bars : null;
 
-        // Last action (online/offline) + timestamp
-        const la = profileData.last_action && typeof profileData.last_action === 'object' ? profileData.last_action : {};
-        if (typeof la.status === 'string') targetObj.lastActionStatus = la.status;
-        if (typeof la.timestamp === 'number') targetObj.lastActionTimestamp = la.timestamp;
-        targetObj.online = (String(targetObj.lastActionStatus || '').toLowerCase() === 'online');
+      const srcPrimary = profile || basic || userData;
+      const srcSecondary = basic || profile || userData;
 
-        // Life
-        const lf = profileData.life && typeof profileData.life === 'object' ? profileData.life : {};
-        if (typeof lf.current === 'number') targetObj.lifeCurrent = lf.current;
-        if (typeof lf.maximum === 'number') targetObj.lifeMax = lf.maximum;
+      const name = (srcPrimary && srcPrimary.name) ? srcPrimary.name : targetObj.name;
+      const level = (srcPrimary && Number.isFinite(Number(srcPrimary.level))) ? Number(srcPrimary.level) :
+        ((srcSecondary && Number.isFinite(Number(srcSecondary.level))) ? Number(srcSecondary.level) : targetObj.level);
 
-        targetObj.updatedAt = Math.floor(Date.now() / 1000);
+      // status + last_action are usually on "basic", but can also appear on "profile" depending on key/selection.
+      const statusRaw = (basic && basic.status) ? basic.status : ((profile && profile.status) ? profile.status : null);
+      const lastActionRaw = (basic && basic.last_action) ? basic.last_action : ((profile && profile.last_action) ? profile.last_action : null);
+
+      const factionRaw = (profile && profile.faction) ? profile.faction : ((basic && basic.faction) ? basic.faction : null);
+
+      const merged = Object.assign({}, targetObj, {
+        name,
+        level,
+        updatedAt: Date.now()
+      });
+
+      if (statusRaw && typeof statusRaw === 'object') {
+        merged.status = Object.assign({}, merged.status || {}, {
+          state: statusRaw.state || statusRaw.status || merged.status?.state || 'Unknown',
+          description: statusRaw.description || statusRaw.details || merged.status?.description || '',
+          until: Number.isFinite(Number(statusRaw.until)) ? Number(statusRaw.until) : (merged.status?.until || 0)
+        });
+      }
+
+      if (lastActionRaw && typeof lastActionRaw === 'object') {
+        merged.last_action = Object.assign({}, merged.last_action || {}, lastActionRaw);
+      }
+
+      if (factionRaw && typeof factionRaw === 'object') {
+        merged.faction = Object.assign({}, merged.faction || {}, factionRaw);
+      }
+
+      if (bars && typeof bars === 'object') {
+        merged.bars = Object.assign({}, merged.bars || {}, bars);
+      }
+
+      const laStatus = merged.last_action && merged.last_action.status ? String(merged.last_action.status) : '';
+      merged.online = laStatus === 'Online';
+
+      return merged;
     }
 
     async function refreshOneTargetProfile(targetId, targetsObj) {
         try {
-            const profileData = await ctx.api.getUserProfile(targetId);
+            const profileData = await ctx.api.getUser(targetId, 'basic,profile,bars');
             if (!profileData) return false;
             if (!targetsObj[targetId]) targetsObj[targetId] = { targetId: String(targetId) };
             mergeProfileIntoTarget(targetsObj[targetId], profileData);
@@ -157,9 +181,9 @@ async function handleAddTarget(payload) {
         nexus.emit('TARGET_ADDED', { targetId, target: targets[targetId] });
 
         // Fetch profile (best-effort)
-        if (ctx.api && typeof ctx.api.getUserProfile === 'function') {
+        if (ctx.api && typeof ctx.api.getUser === 'function') {
           try {
-            const profile = await ctx.api.getUserProfile(targetId);
+            const profile = await ctx.api.getUser(targetId, 'basic,profile,bars');
             if (profile) {
               mergeProfileIntoTarget(targets[targetId], profile);
               targets[targetId].lastUpdated = Date.now();
@@ -274,6 +298,23 @@ async function handleAddTarget(payload) {
 // ============================================
     // EVENT WIRING
     // ============================================
+        const offProfileDetected = nexus.on ? nexus.on('PROFILE_DETECTED', async (payload) => {
+      const playerId = (payload && typeof payload === 'object') ? payload.playerId : payload;
+      const id = String(playerId || '').trim();
+      if (!id) return;
+
+      try {
+        if (!ctx.api || typeof ctx.api.getUser !== 'function') return;
+        const data = await ctx.api.getUser(id, 'basic,profile,bars');
+        store.update('profiles', (prev) => Object.assign({}, prev || {}, { [id]: data }));
+      } catch (err) {
+        // Non-fatal: profile panel can still work without prefetch
+        log('[ActionHandler] PROFILE_DETECTED prefetch failed:', err.message);
+      }
+    }) : null;
+
+
+
     const offAdd = nexus.on ? nexus.on('ADD_TARGET', handleAddTarget) : null;
     const offClaim = nexus.on ? nexus.on('CLAIM_TARGET', handleClaimTarget) : null;
     const offUnclaim = nexus.on ? nexus.on('UNCLAIM_TARGET', handleUnclaimTarget) : null;
