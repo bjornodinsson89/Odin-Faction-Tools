@@ -9,7 +9,7 @@
         "roles": {
           "$uid": {
             ".read": "auth != null && auth.token.factionId === $factionId",
-            ".write": "auth != null && auth.token.factionId === $factionId && (root.child('factions/'+$factionId+'/roles/'+auth.uid).val() === 'Developer' || root.child('factions/'+$factionId+'/roles/'+auth.uid).val() === 'Leader' || root.child('factions/'+$factionId+'/roles/'+auth.uid).val() === 'Admin')",
+            ".write": false,
             ".validate": "newData.isString() && (newData.val() === 'Developer' || newData.val() === 'Leader' || newData.val() === 'Admin' || newData.val() === 'Member')"
           }
         },
