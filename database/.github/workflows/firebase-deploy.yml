@@ -19,10 +19,8 @@ jobs:
   deploy:
     name: Deploy to Firebase
     runs-on: ubuntu-latest
-
     env:
       FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -32,7 +30,7 @@ jobs:
         with:
           node-version: "20"
           cache: "npm"
-          cache-dependency-path: "database/functions/package.json"
+          cache-dependency-path: "database/functions/package-lock.json"
 
       - name: Auth to Google Cloud (Service Account)
         id: auth
@@ -80,8 +78,7 @@ jobs:
       - name: Deployment Summary
         run: |
           echo "✅ Firebase deployment completed successfully!"
-          echo "Project: $FIREBASE_PROJECT_ID"
-          echo "Deployed components:"
+          echo "📋 Deployed components:"
           echo "  - Firestore security rules"
           echo "  - Firestore indexes"
           echo "  - Realtime Database rules"
