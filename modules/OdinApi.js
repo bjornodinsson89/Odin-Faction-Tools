@@ -3,8 +3,6 @@
  * Complete integration for Torn API, TornStats, and FFScouter
  * Version: 5.0.0
  * Author: BjornOdinsson89
- * 
- * FIXED: Added cache size limits and garbage collection
  */
 
 (function() {
@@ -1012,6 +1010,31 @@
       tornApiKey = (key == null) ? '' : String(key).trim();
       if (o.persist !== false) secretSet('tornApiKey', tornApiKey);
       if (!o.silent) log('[API] Torn API key set');
+
+      // Key info (owner/user id) is useful for local dev-unlock and UI gating.
+      // Debounced + in-flight de-duped by the request layer.
+      if (tornApiKey && o.validate !== false) {
+        debounceRequest('torn:keyinfo', async () => {
+          try {
+            const infoResp = await validateTornApiKey();
+            store.set('api.torn.keyInfo', infoResp);
+
+            const inferredId = (infoResp && typeof infoResp === 'object')
+              ? (infoResp.info?.id || infoResp.info?.user_id || infoResp.player_id || infoResp.user_id)
+              : null;
+
+            if (inferredId != null) {
+              const idStr = String(inferredId);
+              store.set('api.torn.userId', idStr);
+              // If Firebase auth isn't established, still expose tornId for local-only dev unlock.
+              if (!store.get('auth.uid')) store.set('auth.tornId', idStr);
+            }
+          } catch (_) {
+            // ignore validation failures; UI can still function in local mode
+          }
+        });
+      }
+
       try { nexus.emit?.('API_KEYS_UPDATED', { service: 'torn', hasKey: !!tornApiKey }); } catch (_) {}
     }
 
@@ -1197,6 +1220,26 @@
 // Expose globally
       window.OdinApiConfig = OdinApiConfig;
       ctx.api = OdinApiConfig;
+
+    // EVENT BRIDGE: UI emits events; OdinApi persists keys and exposes safe API methods.
+    // This keeps UI modules free of direct API calls.
+    nexus.on('SET_API_KEYS', (payload) => {
+      const p = (payload && typeof payload === 'object') ? payload : {};
+      if (typeof p.tornKey === 'string') setTornApiKey(p.tornKey);
+      if (typeof p.tornStatsKey === 'string') setTornStatsApiKey(p.tornStatsKey);
+      if (typeof p.ffScouterKey === 'string') setFFScouterApiKey(p.ffScouterKey);
+      nexus.emit('API_KEYS_UPDATED', {
+        hasTornKey: !!store.get('api.tornKey'),
+        hasTornStatsKey: !!store.get('api.tornStatsKey'),
+        hasFFScouterKey: !!store.get('api.ffScouterKey')
+      });
+    });
+
+    nexus.on('CLEAR_API_KEYS', () => {
+      clearApiKeys();
+      nexus.emit('API_KEYS_UPDATED', { hasTornKey: false, hasTornStatsKey: false, hasFFScouterKey: false });
+    });
+
 
       log('[API Config] Ready');
     }
