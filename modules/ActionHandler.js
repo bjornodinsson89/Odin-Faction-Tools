@@ -15,8 +15,41 @@
     const nexus = ctx.nexus || { emit: () => {}, on: () => () => {} };
     const log = ctx.log || console.log;
     const storage = ctx.storage || { getJSON: () => null, setJSON: () => {} };
+const storage = ctx.storage || { getJSON: () => null, setJSON: () => {} };
 
-    const ACTION_VERSION = '1.0.0';
+    const store = ctx.store || null;
+
+    function syncTargetsToStore(targetsObj) {
+      if (!store || typeof store.set !== 'function' || typeof store.get !== 'function') return;
+      // Store shape expected by UIManager: state.targets is an object map
+      store.set('targets', targetsObj || {});
+    }
+
+    function syncClaimsToStore(claimsObj) {
+      if (!store || typeof store.set !== 'function' || typeof store.get !== 'function') return;
+      store.set('claims', claimsObj || {});
+    }
+
+    function loadTargetsFromStorageToStore() {
+      try {
+        const targets = storage.getJSON('odin_targets', {});
+        syncTargetsToStore(targets || {});
+      } catch (_) {}
+    }
+
+    function loadClaimsFromStorageToStore() {
+      try {
+        const claims = storage.getJSON('odin_claims', {});
+        syncClaimsToStore(claims || {});
+      } catch (_) {}
+    }
+
+    \1
+    // ============================================
+    // INITIAL STATE SYNC (Storage -> Store)
+    // ============================================
+    loadTargetsFromStorageToStore();
+    loadClaimsFromStorageToStore();
 
     // ============================================
     // ADD TARGET HANDLER
@@ -54,7 +87,8 @@
         };
 
         // Save to local storage
-        storage.setJSON('odin_targets', targets);
+        \1
+        syncTargetsToStore(targets);
 
         // Emit success event
         nexus.emit('TARGET_ADDED', { targetId, target: targets[targetId] });
@@ -69,7 +103,8 @@
               targets[targetId].targetName = profile.name || null;
               targets[targetId].level = profile.level || null;
               targets[targetId].factionName = profile.faction?.faction_name || null;
-              storage.setJSON('odin_targets', targets);
+              \1
+              syncTargetsToStore(targets);
 
               nexus.emit('TARGET_INFO_UPDATED', { targetId, target: targets[targetId] });
             }
@@ -145,7 +180,8 @@
         claims[targetId] = claim;
 
         // Save to local storage
-        storage.setJSON('odin_claims', claims);
+        \1
+        syncClaimsToStore(claims);
 
         // Emit success event
         nexus.emit('TARGET_CLAIMED', { targetId, claim });
@@ -196,7 +232,8 @@
         claims[targetId].status = 'released';
         claims[targetId].releasedAt = Date.now();
 
-        storage.setJSON('odin_claims', claims);
+        \1
+        syncClaimsToStore(claims);
 
         nexus.emit('CLAIM_RELEASED', { targetId });
 
@@ -243,7 +280,8 @@
         }
 
         delete targets[targetId];
-        storage.setJSON('odin_targets', targets);
+        \1
+        syncTargetsToStore(targets);
 
         nexus.emit('TARGET_REMOVED', { targetId });
 
