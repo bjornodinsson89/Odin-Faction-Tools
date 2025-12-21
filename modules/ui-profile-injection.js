@@ -98,26 +98,75 @@
     claimBtn.textContent = '🎯 Claim';
     claimBtn.title = 'Claim this target for attack';
     claimBtn.style.cssText = `
-      padding: 6px 12px;
+      padding: 8px 14px;
       background: linear-gradient(135deg, #8B0000 0%, #6B0000 100%);
       color: #fff;
       border: 1px solid #8B0000;
       border-radius: 6px;
-      font-size: 12px;
-      font-weight: 500;
+      font-size: 13px;
+      font-weight: 600;
       cursor: pointer;
-      transition: all 0.2s ease;
-      box-shadow: 0 2px 4px rgba(139, 0, 0, 0.3);
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      box-shadow: 0 3px 8px rgba(139, 0, 0, 0.4);
+      position: relative;
+      overflow: hidden;
     `;
+
+    // Add ripple effect on click
+    const addRipple = (btn, e) => {
+      const ripple = document.createElement('span');
+      const rect = btn.getBoundingClientRect();
+      const size = Math.max(rect.width, rect.height);
+      const x = e.clientX - rect.left - size / 2;
+      const y = e.clientY - rect.top - size / 2;
+
+      ripple.style.cssText = `
+        position: absolute;
+        width: ${size}px;
+        height: ${size}px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.5);
+        left: ${x}px;
+        top: ${y}px;
+        transform: scale(0);
+        animation: ripple-effect 0.6s ease-out;
+        pointer-events: none;
+      `;
+
+      btn.appendChild(ripple);
+      setTimeout(() => ripple.remove(), 600);
+    };
+
+    // Add animation styles to document
+    if (!document.getElementById('odin-profile-button-animations')) {
+      const style = document.createElement('style');
+      style.id = 'odin-profile-button-animations';
+      style.textContent = `
+        @keyframes ripple-effect {
+          to {
+            transform: scale(2);
+            opacity: 0;
+          }
+        }
+      `;
+      document.head.appendChild(style);
+    }
+
     claimBtn.onmouseover = () => {
-      claimBtn.style.transform = 'translateY(-1px)';
-      claimBtn.style.boxShadow = '0 4px 8px rgba(139, 0, 0, 0.4)';
+      claimBtn.style.transform = 'translateY(-3px) scale(1.05)';
+      claimBtn.style.boxShadow = '0 6px 16px rgba(139, 0, 0, 0.6)';
     };
     claimBtn.onmouseout = () => {
-      claimBtn.style.transform = 'translateY(0)';
-      claimBtn.style.boxShadow = '0 2px 4px rgba(139, 0, 0, 0.3)';
+      claimBtn.style.transform = 'translateY(0) scale(1)';
+      claimBtn.style.boxShadow = '0 3px 8px rgba(139, 0, 0, 0.4)';
     };
-    claimBtn.onclick = () => {
+    claimBtn.onclick = (e) => {
+      addRipple(claimBtn, e);
+      claimBtn.style.transform = 'scale(0.95)';
+      setTimeout(() => {
+        claimBtn.style.transform = 'translateY(0) scale(1)';
+      }, 100);
+
       if (ctx.nexus) {
         ctx.nexus.emit('CLAIM_TARGET', { targetId: playerId, type: 'attack' });
         showProfileToast('Target claimed!', 'success');
@@ -132,26 +181,34 @@
     targetBtn.textContent = '📌 Add Target';
     targetBtn.title = 'Add to faction target list';
     targetBtn.style.cssText = `
-      padding: 6px 12px;
+      padding: 8px 14px;
       background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
       color: #fff;
       border: 1px solid #3b82f6;
       border-radius: 6px;
-      font-size: 12px;
-      font-weight: 500;
+      font-size: 13px;
+      font-weight: 600;
       cursor: pointer;
-      transition: all 0.2s ease;
-      box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3);
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      box-shadow: 0 3px 8px rgba(59, 130, 246, 0.4);
+      position: relative;
+      overflow: hidden;
     `;
     targetBtn.onmouseover = () => {
-      targetBtn.style.transform = 'translateY(-1px)';
-      targetBtn.style.boxShadow = '0 4px 8px rgba(59, 130, 246, 0.4)';
+      targetBtn.style.transform = 'translateY(-3px) scale(1.05)';
+      targetBtn.style.boxShadow = '0 6px 16px rgba(59, 130, 246, 0.6)';
     };
     targetBtn.onmouseout = () => {
-      targetBtn.style.transform = 'translateY(0)';
-      targetBtn.style.boxShadow = '0 2px 4px rgba(59, 130, 246, 0.3)';
+      targetBtn.style.transform = 'translateY(0) scale(1)';
+      targetBtn.style.boxShadow = '0 3px 8px rgba(59, 130, 246, 0.4)';
     };
-    targetBtn.onclick = () => {
+    targetBtn.onclick = (e) => {
+      addRipple(targetBtn, e);
+      targetBtn.style.transform = 'scale(0.95)';
+      setTimeout(() => {
+        targetBtn.style.transform = 'translateY(0) scale(1)';
+      }, 100);
+
       if (ctx.nexus) {
         ctx.nexus.emit('ADD_TARGET', { targetId: playerId });
         showProfileToast('Added to target list!', 'success');
@@ -200,24 +257,47 @@
     const toast = document.createElement('div');
     toast.className = 'odin-profile-toast';
     toast.textContent = message;
+
+    // Determine background based on type
+    let background = 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)';
+    if (type === 'success') background = 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)';
+    if (type === 'error') background = 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)';
+    if (type === 'warning') background = 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)';
+
     toast.style.cssText = `
       position: fixed;
-      bottom: 20px;
-      right: 20px;
-      padding: 12px 20px;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%) translateY(-100%);
+      padding: 14px 24px;
       border-radius: 8px;
       color: #fff;
-      font-size: 13px;
-      font-weight: 500;
-      z-index: 100000;
-      animation: slideIn 0.3s ease;
-      ${type === 'success' ? 'background: #22c55e;' : type === 'error' ? 'background: #ef4444;' : 'background: #3b82f6;'}
+      font-size: 14px;
+      font-weight: 600;
+      z-index: 999999;
+      background: ${background};
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+      min-width: 300px;
+      text-align: center;
+      opacity: 0;
+      transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
     `;
 
     document.body.appendChild(toast);
 
+    // Trigger animation
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        toast.style.transform = 'translateX(-50%) translateY(0)';
+        toast.style.opacity = '1';
+      });
+    });
+
     setTimeout(() => {
-      toast.remove();
+      toast.style.transform = 'translateX(-50%) translateY(-100%)';
+      toast.style.opacity = '0';
+      setTimeout(() => toast.remove(), 400);
     }, 3000);
   }
 

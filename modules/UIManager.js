@@ -282,15 +282,29 @@
           justify-content: center;
           font-size: 0;
           box-shadow: 0 4px 15px rgba(139, 0, 0, 0.4);
-          transition: all 0.3s ease;
+          transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+          animation: pulse-glow 2s ease-in-out infinite;
         }
         #odin-toggle-btn:hover {
-          transform: scale(1.1);
-          box-shadow: 0 6px 20px rgba(139, 0, 0, 0.6);
+          transform: scale(1.15) rotate(5deg);
+          box-shadow: 0 8px 30px rgba(139, 0, 0, 0.7);
+          animation: none;
+        }
+        #odin-toggle-btn:active {
+          transform: scale(0.95);
         }
         #odin-toggle-btn.active {
           background: linear-gradient(135deg, #8B0000 0%, #6B0000 100%);
           z-index: 99996;
+          animation: none;
+        }
+        @keyframes pulse-glow {
+          0%, 100% {
+            box-shadow: 0 4px 15px rgba(139, 0, 0, 0.4);
+          }
+          50% {
+            box-shadow: 0 4px 25px rgba(139, 0, 0, 0.6);
+          }
         }
 
         /* Main Panel */
@@ -402,14 +416,45 @@
           color: #a0a0a0;
           font-size: 11px;
           cursor: pointer;
-          transition: all 0.2s ease;
+          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
           text-align: center;
+          position: relative;
+          overflow: hidden;
         }
-        .odin-tab:hover { background: rgba(139, 0, 0, 0.1); color: #fff; }
+        .odin-tab::before {
+          content: '';
+          position: absolute;
+          bottom: 0;
+          left: 50%;
+          width: 0;
+          height: 2px;
+          background: #8B0000;
+          transform: translateX(-50%);
+          transition: width 0.3s ease;
+        }
+        .odin-tab:hover {
+          background: rgba(139, 0, 0, 0.1);
+          color: #fff;
+          transform: translateY(-2px);
+        }
+        .odin-tab:hover::before {
+          width: 80%;
+        }
+        .odin-tab:active {
+          transform: translateY(0) scale(0.95);
+        }
         .odin-tab.active {
           background: linear-gradient(135deg, #8B0000 0%, #6B0000 100%);
           color: #fff;
           border-color: #8B0000;
+          box-shadow: 0 2px 8px rgba(139, 0, 0, 0.4);
+          transform: translateY(0);
+        }
+        .odin-tab.active::before {
+          width: 100%;
+          height: 100%;
+          background: rgba(255, 255, 255, 0.1);
+          border-radius: 6px;
         }
 
         /* Content Area */
@@ -419,10 +464,21 @@
           padding: 16px;
           color: #e0e0e0;
           max-height: 550px;
+          animation: fadeIn 0.3s ease-in-out;
         }
         .odin-content::-webkit-scrollbar { width: 6px; }
         .odin-content::-webkit-scrollbar-track { background: #1a1a2e; }
         .odin-content::-webkit-scrollbar-thumb { background: #8B0000; border-radius: 3px; }
+        @keyframes fadeIn {
+          from {
+            opacity: 0;
+            transform: translateY(10px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
 
         /* ============================
            AUTH TERMINAL SCREEN
@@ -589,30 +645,81 @@
           cursor: pointer;
           font-size: 13px;
           font-weight: 500;
-          transition: all 0.2s ease;
+          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+          position: relative;
+          overflow: hidden;
+        }
+        .odin-btn::before {
+          content: '';
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          width: 0;
+          height: 0;
+          border-radius: 50%;
+          background: rgba(255, 255, 255, 0.3);
+          transform: translate(-50%, -50%);
+          transition: width 0.6s, height 0.6s;
+        }
+        .odin-btn:active::before {
+          width: 300px;
+          height: 300px;
         }
         .odin-btn-primary {
           background: linear-gradient(135deg, #8B0000 0%, #6B0000 100%);
           color: #fff;
+          box-shadow: 0 2px 8px rgba(139, 0, 0, 0.3);
         }
         .odin-btn-primary:hover {
-          transform: translateY(-1px);
-          box-shadow: 0 4px 12px rgba(139, 0, 0, 0.4);
+          transform: translateY(-2px) scale(1.02);
+          box-shadow: 0 6px 16px rgba(139, 0, 0, 0.5);
+        }
+        .odin-btn-primary:active {
+          transform: translateY(0) scale(0.98);
         }
         .odin-btn-secondary {
           background: rgba(255, 255, 255, 0.1);
           color: #e0e0e0;
           border: 1px solid rgba(255, 255, 255, 0.2);
+          box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
         }
-        .odin-btn-secondary:hover { background: rgba(255, 255, 255, 0.15); }
+        .odin-btn-secondary:hover {
+          background: rgba(255, 255, 255, 0.15);
+          transform: translateY(-2px);
+          box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+        }
+        .odin-btn-secondary:active {
+          transform: translateY(0) scale(0.98);
+        }
         .odin-btn-small { padding: 4px 10px; font-size: 11px; }
         .odin-btn-success {
           background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
           color: #fff;
+          box-shadow: 0 2px 8px rgba(34, 197, 94, 0.3);
+        }
+        .odin-btn-success:hover {
+          transform: translateY(-2px) scale(1.02);
+          box-shadow: 0 6px 16px rgba(34, 197, 94, 0.5);
+        }
+        .odin-btn-success:active {
+          transform: translateY(0) scale(0.98);
         }
         .odin-btn-danger {
           background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
           color: #fff;
+          box-shadow: 0 2px 8px rgba(239, 68, 68, 0.3);
+        }
+        .odin-btn-danger:hover {
+          transform: translateY(-2px) scale(1.02);
+          box-shadow: 0 6px 16px rgba(239, 68, 68, 0.5);
+        }
+        .odin-btn-danger:active {
+          transform: translateY(0) scale(0.98);
+        }
+        .odin-btn:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+          transform: none !important;
         }
 
         /* Form Elements */
@@ -710,20 +817,47 @@
         /* Toast */
         .odin-toast {
           position: fixed;
-          bottom: 90px;
-          right: 20px;
-          padding: 12px 20px;
+          top: 20px;
+          left: 50%;
+          transform: translateX(-50%);
+          padding: 14px 24px;
           border-radius: 8px;
           color: #fff;
-          font-size: 13px;
-          z-index: 100000;
-          animation: slideIn 0.3s ease;
+          font-size: 14px;
+          font-weight: 500;
+          z-index: 999999;
+          animation: slideDown 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+          box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+          min-width: 300px;
+          text-align: center;
         }
-        .odin-toast.success { background: #22c55e; }
-        .odin-toast.error { background: #ef4444; }
-        .odin-toast.warning { background: #f59e0b; color: #000; }
-        .odin-toast.info { background: #3b82f6; }
-        @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        .odin-toast.success {
+          background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+          border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .odin-toast.error {
+          background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+          border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .odin-toast.warning {
+          background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+          color: #fff;
+          border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .odin-toast.info {
+          background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+          border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        @keyframes slideDown {
+          from {
+            transform: translateX(-50%) translateY(-100%);
+            opacity: 0;
+          }
+          to {
+            transform: translateX(-50%) translateY(0);
+            opacity: 1;
+          }
+        }
 
         /* Chain Timer */
         .odin-chain-timer { font-size: 48px; font-weight: 700; text-align: center; padding: 20px; }
@@ -1823,33 +1957,85 @@
     // PUBLIC API ACTIONS
     // ============================================
     window.OdinUI = {
-      refreshClaims: () => nexus.emit?.('REFRESH_CLAIMS'),
+      refreshClaims: () => {
+        nexus.emit?.('REFRESH_CLAIMS');
+        showToast('Refreshing claims...', 'info');
+      },
       addTarget: () => {
         const input = document.getElementById('odin-add-target-input');
         if (input?.value) {
-          nexus.emit?.('ADD_TARGET', { targetId: input.value });
+          const targetId = input.value.trim();
+          if (!targetId) {
+            showToast('Please enter a valid target ID', 'error');
+            return;
+          }
+          nexus.emit?.('ADD_TARGET', { targetId });
           input.value = '';
+          showToast('Adding target...', 'success');
+        } else {
+          showToast('Please enter a target ID', 'error');
         }
       },
-      claimTarget: (targetId) => nexus.emit?.('CLAIM_TARGET', { targetId, type: 'attack' }),
-      releaseClaim: (targetId) => nexus.emit?.('RELEASE_CLAIM', { targetId }),
-      removeTarget: (targetId) => nexus.emit?.('REMOVE_TARGET', { targetId }),
-      scoreAllTargets: () => nexus.emit?.('SCORE_ALL_TARGETS'),
-      startWatching: () => nexus.emit?.('START_WATCHING'),
-      alertChain: () => nexus.emit?.('ALERT_CHAIN'),
+      claimTarget: (targetId) => {
+        nexus.emit?.('CLAIM_TARGET', { targetId, type: 'attack' });
+        showToast('Claiming target...', 'success');
+      },
+      releaseClaim: (targetId) => {
+        nexus.emit?.('RELEASE_CLAIM', { targetId });
+        showToast('Releasing claim...', 'info');
+      },
+      removeTarget: (targetId) => {
+        if (confirm('Are you sure you want to remove this target?')) {
+          nexus.emit?.('REMOVE_TARGET', { targetId });
+          showToast('Target removed', 'success');
+          setTimeout(() => renderTabContent('targets'), 500);
+        }
+      },
+      scoreAllTargets: () => {
+        nexus.emit?.('SCORE_ALL_TARGETS');
+        showToast('Scoring all targets...', 'info');
+      },
+      startWatching: () => {
+        nexus.emit?.('START_WATCHING');
+        showToast('Watch mode activated', 'success');
+      },
+      alertChain: () => {
+        nexus.emit?.('ALERT_CHAIN');
+        showToast('Chain alert sent!', 'warning');
+      },
       signUpForSlot: () => {
         const day = document.getElementById('odin-schedule-day')?.value;
         const hour = document.getElementById('odin-schedule-hour')?.value;
         if (day !== undefined && hour !== undefined) {
           nexus.emit?.('SIGN_UP_SLOT', { day: parseInt(day), hour: parseInt(hour) });
           showToast('Signed up for slot!', 'success');
+        } else {
+          showToast('Please select a day and hour', 'error');
         }
       },
-      viewDaySchedule: (day) => { nexus.emit?.('VIEW_DAY_SCHEDULE', { day }); },
-      removeFavorite: (targetId) => nexus.emit?.('REMOVE_FAVORITE', { targetId }),
-      getRecommendations: () => nexus.emit?.('GET_RECOMMENDATIONS'),
-      exportData: () => nexus.emit?.('EXPORT_DATA'),
-      clearExpired: () => nexus.emit?.('CLEAR_EXPIRED'),
+      viewDaySchedule: (day) => {
+        nexus.emit?.('VIEW_DAY_SCHEDULE', { day });
+        showToast('Loading schedule...', 'info');
+      },
+      removeFavorite: (targetId) => {
+        nexus.emit?.('REMOVE_FAVORITE', { targetId });
+        showToast('Favorite removed', 'success');
+        setTimeout(() => renderTabContent('personal'), 500);
+      },
+      getRecommendations: () => {
+        nexus.emit?.('GET_RECOMMENDATIONS');
+        showToast('Getting AI recommendations...', 'info');
+      },
+      exportData: () => {
+        nexus.emit?.('EXPORT_DATA');
+        showToast('Exporting data...', 'info');
+      },
+      clearExpired: () => {
+        if (confirm('Clear all expired claims and targets?')) {
+          nexus.emit?.('CLEAR_EXPIRED');
+          showToast('Clearing expired items...', 'success');
+        }
+      },
 
       // FIXED: Only save keys that were actually changed
       saveApiKeys: () => {
@@ -1879,17 +2065,23 @@
       },
 
       savePreferences: () => {
-        const prefs = {
-          autoScore: document.getElementById('odin-auto-score')?.checked,
-          showButtons: document.getElementById('odin-show-buttons')?.checked,
-          chainAlerts: document.getElementById('odin-chain-alerts')?.checked,
-          claimExpiry: parseInt(document.getElementById('odin-claim-expiry')?.value) || 10
-        };
+        try {
+          const prefs = {
+            autoScore: document.getElementById('odin-auto-score')?.checked,
+            showButtons: document.getElementById('odin-show-buttons')?.checked,
+            chainAlerts: document.getElementById('odin-chain-alerts')?.checked,
+            claimExpiry: parseInt(document.getElementById('odin-claim-expiry')?.value) || 10
+          };
 
-        const settings = { ...ctx.settings, ...prefs };
-        ctx.saveSettings(settings);
-        nexus.emit?.('SAVE_PREFERENCES', prefs);
-        showToast('Preferences saved!', 'success');
+          const settings = { ...ctx.settings, ...prefs };
+          if (ctx.saveSettings && typeof ctx.saveSettings === 'function') {
+            ctx.saveSettings(settings);
+          }
+          nexus.emit?.('SAVE_PREFERENCES', prefs);
+          showToast('Preferences saved successfully!', 'success');
+        } catch (e) {
+          showToast('Failed to save preferences: ' + (e && e.message ? e.message : String(e)), 'error');
+        }
       },
 
       authenticateWithDatabase: () => {
@@ -1901,7 +2093,7 @@
         // Switch to War Room tab to trigger auth gate
         setTimeout(() => {
           switchTab('warRoom');
-        }, 500);
+        }, 800);
       },
 
       // Log Console Functions
@@ -1932,8 +2124,12 @@
       },
 
       refreshLogs: () => {
-        renderTabContent('settings');
-        showToast('Logs refreshed', 'success');
+        try {
+          renderTabContent('settings');
+          showToast('Logs refreshed successfully', 'success');
+        } catch (e) {
+          showToast('Failed to refresh logs', 'error');
+        }
       },
 
       copyLogs: async () => {
