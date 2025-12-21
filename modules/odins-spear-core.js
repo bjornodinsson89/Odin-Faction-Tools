@@ -209,27 +209,61 @@
 
       window.OdinContext = ctx;
 
+      ctx.log('[OdinsSpear] ========================================');
+      ctx.log('[OdinsSpear] CORE RUNTIME v' + runtime.version);
+      ctx.log('[OdinsSpear] Initializing modules...');
+      ctx.log('[OdinsSpear] ========================================');
+
       ctx.nexus.emit('CORE_READY', { version: runtime.version });
 
       const mods = Array.isArray(window.OdinModules) ? window.OdinModules.slice() : [];
       const handles = [];
 
-      for (const modInit of mods) {
+      ctx.log('[OdinsSpear] Registered modules:', mods.length);
+
+      for (let i = 0; i < mods.length; i++) {
+        const modInit = mods[i];
         try {
-          if (typeof modInit !== 'function') continue;
-          const handle = modInit(ctx);
-          if (handle && typeof handle.init === 'function') {
-            handle.init();
+          if (typeof modInit !== 'function') {
+            ctx.warn('[OdinsSpear] Module ' + (i + 1) + ' is not a function, skipping');
+            continue;
           }
-          handles.push(handle || { id: '(anonymous)' });
-          ctx.nexus.emit('MODULE_READY', { id: (handle && handle.id) || '(anonymous)' });
+
+          ctx.log('[OdinsSpear] [' + (i + 1) + '/' + mods.length + '] Initializing module...');
+
+          const handle = modInit(ctx);
+          const moduleId = (handle && handle.id) || '(anonymous)';
+
+          ctx.log('[OdinsSpear] [' + (i + 1) + '/' + mods.length + '] Module loaded:', moduleId);
+
+          if (handle && typeof handle.init === 'function') {
+            ctx.log('[OdinsSpear] [' + (i + 1) + '/' + mods.length + '] Calling init() for:', moduleId);
+            handle.init();
+            ctx.log('[OdinsSpear] [' + (i + 1) + '/' + mods.length + '] ✓ Initialized:', moduleId);
+          } else {
+            ctx.log('[OdinsSpear] [' + (i + 1) + '/' + mods.length + '] No init() method for:', moduleId);
+          }
+
+          handles.push(handle || { id: moduleId });
+          ctx.nexus.emit('MODULE_READY', { id: moduleId });
         } catch (e) {
-          ctx.error('[Odin] Module init error', e);
-          ctx.nexus.emit('MODULE_ERROR', { error: String(e && e.message ? e.message : e) });
+          ctx.error('[OdinsSpear] ========================================');
+          ctx.error('[OdinsSpear] MODULE INITIALIZATION ERROR!');
+          ctx.error('[OdinsSpear] Module index:', i + 1);
+          ctx.error('[OdinsSpear] Error:', e.message);
+          ctx.error('[OdinsSpear] Stack:', e.stack);
+          ctx.error('[OdinsSpear] ========================================');
+          ctx.nexus.emit('MODULE_ERROR', { error: String(e && e.message ? e.message : e), index: i });
         }
       }
 
       runtime.modules = handles;
+
+      ctx.log('[OdinsSpear] ========================================');
+      ctx.log('[OdinsSpear] ✓ ALL MODULES INITIALIZED');
+      ctx.log('[OdinsSpear] Total modules:', handles.length);
+      ctx.log('[OdinsSpear] Module IDs:', handles.map(h => h.id || '(anonymous)').join(', '));
+      ctx.log('[OdinsSpear] ========================================');
 
       ctx.nexus.emit('RUNTIME_READY', { modules: handles.length });
       return runtime;

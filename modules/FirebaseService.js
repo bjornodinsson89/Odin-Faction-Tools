@@ -175,9 +175,23 @@
     }
 
     function initFirebase() {
-      ensureFirebaseCompat();
+      try {
+        ensureFirebaseCompat();
+      } catch (e) {
+        log('[Firebase] ========================================');
+        log('[Firebase] FIREBASE SDK NOT LOADED');
+        log('[Firebase] This is non-fatal - script will continue in offline mode');
+        log('[Firebase] Error:', e.message);
+        log('[Firebase] ========================================');
+        store.set('firebase.initialized', false);
+        store.set('firebase.available', false);
+        nexus.emit('FIREBASE_UNAVAILABLE', { error: e.message });
+        return false;
+      }
 
-      log('[Firebase] ===== INITIALIZING FIREBASE =====');
+      log('[Firebase] ========================================');
+      log('[Firebase] INITIALIZING FIREBASE');
+      log('[Firebase] ========================================');
       log('[Firebase] SDK Status:', {
         hasFirebase: typeof window.firebase !== 'undefined',
         hasAuth: typeof window.firebase?.auth === 'function',
@@ -186,22 +200,60 @@
         hasFunctions: typeof window.firebase?.app === 'function'
       });
 
-      if (!window.firebase.apps || window.firebase.apps.length === 0) {
-        app = window.firebase.initializeApp(firebaseConfig);
-        log('[Firebase] ✓ Firebase app initialized');
-      } else {
-        app = window.firebase.app();
-        log('[Firebase] ✓ Using existing Firebase app');
+      try {
+        if (!window.firebase.apps || window.firebase.apps.length === 0) {
+          app = window.firebase.initializeApp(firebaseConfig);
+          log('[Firebase] ✓ Firebase app initialized');
+        } else {
+          app = window.firebase.app();
+          log('[Firebase] ✓ Using existing Firebase app');
+        }
+
+        auth = window.firebase.auth();
+        db = window.firebase.database();
+        log('[Firebase] ✓ Auth and Database initialized');
+      } catch (initError) {
+        log('[Firebase] ========================================');
+        log('[Firebase] FIREBASE INITIALIZATION FAILED');
+        log('[Firebase] This is non-fatal - script will continue in offline mode');
+        log('[Firebase] Error:', initError.message);
+        log('[Firebase] ========================================');
+        store.set('firebase.initialized', false);
+        store.set('firebase.available', false);
+        nexus.emit('FIREBASE_UNAVAILABLE', { error: initError.message });
+        return false;
       }
 
-      auth = window.firebase.auth();
-      db = window.firebase.database();
-      log('[Firebase] ✓ Auth and Database initialized');
-
-      // Initialize Firestore with proper error handling
+      // Initialize Firestore with proper error handling and settings
       try {
         if (typeof window.firebase.firestore === 'function') {
           fs = window.firebase.firestore();
+
+          // CRITICAL: Apply Firestore settings BEFORE any usage
+          // This must be done exactly ONCE and BEFORE any Firestore operations
+          try {
+            log('[Firebase] Applying Firestore settings...');
+            fs.settings({
+              // Use long-polling instead of WebSocket for userscript compatibility
+              // WebSocket connections often fail in Tampermonkey/Greasemonkey environments
+              experimentalForceLongPolling: true,
+
+              // Ignore undefined properties to prevent write errors
+              ignoreUndefinedProperties: true,
+
+              // Merge behavior for set operations
+              merge: true
+            });
+            log('[Firebase] ✓ Firestore settings applied successfully');
+            log('[Firebase]   - Long-polling transport: ENABLED (userscript-safe)');
+            log('[Firebase]   - Ignore undefined properties: ENABLED');
+            log('[Firebase]   - Merge mode: ENABLED');
+          } catch (settingsErr) {
+            // Settings can only be applied once. If they fail, Firestore may already be initialized.
+            log('[Firebase] WARNING: Could not apply Firestore settings:', settingsErr.message);
+            log('[Firebase] This may cause connection issues. If you see WebChannel errors, reload the page.');
+          }
+
           log('[Firebase] ✓ Firestore initialized successfully');
         } else {
           log('[Firebase] WARNING: Firestore SDK not loaded. Please add firestore-compat.js to your userscript @require directives.');
@@ -254,13 +306,21 @@
         setupFirestoreMonitoring();
       }
 
-      if (!unsubAuth) {
-        unsubAuth = auth.onAuthStateChanged((user) => {
-          refreshClaims(user);
-        });
+      if (!unsubAuth && auth) {
+        try {
+          unsubAuth = auth.onAuthStateChanged((user) => {
+            refreshClaims(user);
+          });
+        } catch (authErr) {
+          log('[Firebase] WARNING: Could not set up auth state listener:', authErr.message);
+        }
       }
 
       store.set('firebase.initialized', true);
+      store.set('firebase.available', true);
+      log('[Firebase] ========================================');
+      log('[Firebase] ✓ FIREBASE FULLY INITIALIZED');
+      log('[Firebase] ========================================');
       return true;
     }
 

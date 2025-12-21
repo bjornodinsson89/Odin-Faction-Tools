@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Odin Faction Tools
 // @namespace    http://tampermonkey.net/
-// @version      5.1.1
-// @description  Torn City faction management tools with Firebase backend, comprehensive logging, and profile actions
+// @version      5.2.0
+// @description  Torn City faction management tools with Firebase backend, comprehensive logging, and profile actions - AUDIT FIX: Firestore settings, graceful degradation, diagnostic logging
 // @author       BjornOdinsson89
 // @match        https://www.torn.com/*
 // @icon         https://i.postimg.cc/BQ6bSYKM/file-000000004bb071f5a96fc52564bf26ad-(1).png
@@ -40,7 +40,7 @@
      ODIN FACTION TOOLS - MAIN ENTRY POINT
      ============================================================ */
 
-  console.log('[Odin] Initializing Odin Faction Tools v5.1.1');
+  console.log('[Odin] Initializing Odin Faction Tools v5.2.0 (Audit Fix)');
 
   // Verify Firebase is loaded
   if (typeof window.firebase === 'undefined') {
@@ -107,79 +107,99 @@
   /* ============================================================
      MODULE LOADER
      ============================================================ */
-  const LOAD_ORDER = [
-    'odins-spear-core.js',        // Core runtime
-    'LogManager.js',               // Logging system
-    'NeuralNetwork.js',            // Neural network for Freki
-    'FirebaseService.js',          // Firebase + Firestore
-    'AccessControl.js',            // Role management
-    'OdinApi.js',                  // API client
-    'freki.js',                    // AI scoring
-    'ActionHandler.js',            // Action handlers (targets, claims)
-    'UIManager.js',                // UI
-    'ui-profile-injection.js'      // Profile injection
-  ];
+  // NOTE: Modules are loaded via @require directives (lines 24-33) which execute
+  // BEFORE this main script runs. The @require mechanism ensures proper load order
+  // and caching. We do NOT need to dynamically load modules again here.
+  //
+  // Expected module load order from @require:
+  //   1. odins-spear-core.js      - Core runtime
+  //   2. LogManager.js             - Logging system
+  //   3. FirebaseService.js        - Firebase + Firestore
+  //   4. AccessControl.js          - Role management
+  //   5. OdinApi.js                - API client
+  //   6. NeuralNetwork.js          - Neural network for Freki
+  //   7. freki.js                  - AI scoring
+  //   8. ActionHandler.js          - Action handlers (targets, claims)
+  //   9. UIManager.js              - UI
+  //   10. ui-profile-injection.js  - Profile injection
+  //
+  // Each module registers itself by calling: window.OdinModules.push(moduleInitFn)
 
-  function loadModuleScript(filename) {
-    return new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.src = `https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/main/modules/${filename}`;
-      script.onload = () => {
-        console.log('[Odin] Loaded module:', filename);
-        resolve();
-      };
-      script.onerror = () => {
-        console.error('[Odin] Failed to load module:', filename);
-        reject(new Error('Failed to load ' + filename));
-      };
-      document.head.appendChild(script);
-    });
-  }
+  function verifyModulesLoaded() {
+    const moduleCount = Array.isArray(window.OdinModules) ? window.OdinModules.length : 0;
+    console.log('[Odin] Modules registered via @require:', moduleCount);
 
-  async function loadAllModules() {
-    console.log('[Odin] Loading modules...');
-
-    for (const filename of LOAD_ORDER) {
-      try {
-        await loadModuleScript(filename);
-        await new Promise(resolve => setTimeout(resolve, 100)); // Small delay between modules
-      } catch (e) {
-        console.error('[Odin] Module loading error:', filename, e);
-      }
+    if (moduleCount === 0) {
+      console.error('[Odin] CRITICAL: No modules registered! Check @require directives.');
+      return false;
     }
 
-    console.log('[Odin] All modules loaded');
+    // Expected modules: 10
+    if (moduleCount < 10) {
+      console.warn('[Odin] WARNING: Expected 10 modules, found', moduleCount);
+      console.warn('[Odin] Some modules may have failed to load. Check browser console for errors.');
+    }
+
+    return true;
   }
 
   /* ============================================================
      INITIALIZATION
      ============================================================ */
   async function initializeOdin() {
-    console.log('[Odin] Starting initialization sequence...');
+    console.log('[Odin] ========================================');
+    console.log('[Odin] ODIN FACTION TOOLS v5.2.0 (Audit Fix)');
+    console.log('[Odin] Initialization started at:', new Date().toISOString());
+    console.log('[Odin] ========================================');
 
     // Wait for DOM to be ready
     if (document.readyState === 'loading') {
+      console.log('[Odin] Waiting for DOMContentLoaded...');
       await new Promise(resolve => {
         document.addEventListener('DOMContentLoaded', resolve, { once: true });
       });
     }
 
-    console.log('[Odin] DOM ready');
+    console.log('[Odin] DOM ready (readyState:', document.readyState + ')');
 
-    // Load all modules
-    await loadAllModules();
+    // Verify modules loaded via @require
+    console.log('[Odin] Verifying module registration...');
+    const modulesOk = verifyModulesLoaded();
+    if (!modulesOk) {
+      console.error('[Odin] Module verification failed. Cannot continue.');
+      alert('Odin Tools Error: Modules failed to load. Please reinstall the script.');
+      return;
+    }
 
-    // Wait a bit for modules to register
-    await new Promise(resolve => setTimeout(resolve, 500));
-
-    // Initialize core
-    if (window.OdinsSpear && typeof window.OdinsSpear.init === 'function') {
-      console.log('[Odin] Initializing Odin\'s Spear runtime...');
-      window.OdinsSpear.init();
-      console.log('[Odin] ✓ Odin Faction Tools ready!');
-    } else {
+    // Verify OdinsSpear core exists
+    if (!window.OdinsSpear || typeof window.OdinsSpear.init !== 'function') {
       console.error('[Odin] CRITICAL: OdinsSpear runtime not found!');
+      console.error('[Odin] window.OdinsSpear:', window.OdinsSpear);
       console.error('[Odin] Registered modules:', window.OdinModules ? window.OdinModules.length : 0);
+      alert('Odin Tools Error: Core runtime missing. Please reinstall the script.');
+      return;
+    }
+
+    // Initialize core runtime (this will initialize all registered modules)
+    console.log('[Odin] ========================================');
+    console.log('[Odin] Initializing Odin\'s Spear runtime...');
+    console.log('[Odin] This will initialize all registered modules in order');
+    console.log('[Odin] ========================================');
+
+    try {
+      window.OdinsSpear.init();
+      console.log('[Odin] ========================================');
+      console.log('[Odin] ✓ Odin Faction Tools READY!');
+      console.log('[Odin] ✓ Modules initialized:', window.OdinsSpear.modules?.length || 0);
+      console.log('[Odin] ✓ Toggle button should be visible in bottom-left');
+      console.log('[Odin] ========================================');
+    } catch (err) {
+      console.error('[Odin] ========================================');
+      console.error('[Odin] INITIALIZATION FAILED!');
+      console.error('[Odin] Error:', err.message);
+      console.error('[Odin] Stack:', err.stack);
+      console.error('[Odin] ========================================');
+      throw err;
     }
   }
 
