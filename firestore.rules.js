@@ -11,14 +11,19 @@ service cloud.firestore {
     }
 
     // Per-user documents (private to the signed-in user)
+    match /users/{userId} {
+      allow read, write: if isAuthed() && request.auth.uid == userId;
+    }
     match /users/{userId}/{document=**} {
       allow read, write: if isAuthed() && request.auth.uid == userId;
     }
 
     // Faction-scoped documents (read/write for faction members)
+    match /factions/{factionId} {
+      allow read, write: if factionMatch(factionId);
+    }
     match /factions/{factionId}/{document=**} {
-      allow read: if factionMatch(factionId);
-      allow write: if factionMatch(factionId);
+      allow read, write: if factionMatch(factionId);
     }
 
     // Public, read-only Freki models
