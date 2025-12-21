@@ -15,6 +15,13 @@
 // @connect      ffscouter.com
 // @connect      torn-war-room.firebaseio.com
 // @connect      firestore.googleapis.com
+// @connect      firebase.googleapis.com
+// @connect      identitytoolkit.googleapis.com
+// @connect      securetoken.googleapis.com
+// @connect      www.googleapis.com
+// @connect      googleapis.com
+// @connect      gstatic.com
+// @connect      googleusercontent.com
 // @run-at       document-start
 // @require      https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js
 // @require      https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js
@@ -35,6 +42,21 @@
 
 (function() {
   'use strict';
+
+  /* ============================================================
+     GLOBAL ERROR HOOKS
+     ============================================================ */
+  window.addEventListener('error', (e) => {
+    try {
+      console.error('[Odin] Uncaught error:', e.message, e.error || e);
+    } catch (_) {}
+  });
+
+  window.addEventListener('unhandledrejection', (e) => {
+    try {
+      console.error('[Odin] Unhandled promise rejection:', e.reason || e);
+    } catch (_) {}
+  });
 
   /* ============================================================
      ODIN FACTION TOOLS - MAIN ENTRY POINT
@@ -82,6 +104,10 @@
           onload: function(response) {
             try {
               const data = JSON.parse(response.responseText);
+              try {
+                const safeUrl = (url || '').replace(/(\?|&)key=[^&]+/ig, '$1key=<API_KEY>');
+                console.log('[Odin][requestJSON]', (options.method || 'GET'), safeUrl, 'status=' + response.status);
+              } catch (_) {}
               resolve(data);
             } catch (e) {
               reject(new Error('Failed to parse JSON response'));
