@@ -212,7 +212,45 @@
     console.log('[Odin] This will initialize all registered modules in order');
     console.log('[Odin] ========================================');
 
-    try {
+        // Enforce deterministic module init sequence (prevents lost Nexus events)
+    const moduleOrder = [
+      'log-manager',      // Critical for debugging
+      'neural-network',   // Logic dependency
+      'odin-api-config',  // Data dependency
+      'firebase-service', // Auth dependency
+      'access-control',   // Role dependency
+      'action-handler',   // Core logic (Handle events before they are emitted)
+      'freki-ai',         // Scoring engine
+      'odin-ui-manager',  // UI (Wait for logic to be ready)
+      'ui-profile-injection' // Injector (Emits events to already-active handlers)
+    ];
+
+    if (Array.isArray(window.OdinModules)) {
+      const extractId = (fn) => {
+        try {
+          const src = Function.prototype.toString.call(fn);
+          const m = src.match(/\bid\s*:\s*['"]([^'"]+)['"]/);
+          return m ? m[1] : null;
+        } catch (_) { return null; }
+      };
+
+      const idxById = new Map(moduleOrder.map((id, i) => [id, i]));
+      const weighted = window.OdinModules.map((fn, idx) => ({ fn, idx, id: extractId(fn) }));
+
+      weighted.sort((a, b) => {
+        const ai = idxById.has(a.id) ? idxById.get(a.id) : (10000 + a.idx);
+        const bi = idxById.has(b.id) ? idxById.get(b.id) : (10000 + b.idx);
+        return ai - bi;
+      });
+
+      window.OdinModules = weighted.map((x) => x.fn);
+
+      try {
+        console.log('[Odin] Module order enforced:', weighted.map((x) => x.id || '(unknown)').join(' → '));
+      } catch (_) {}
+    }
+
+try {
       window.OdinsSpear.init();
       console.log('[Odin] ========================================');
       console.log('[Odin] ✓ Odin Faction Tools READY!');
