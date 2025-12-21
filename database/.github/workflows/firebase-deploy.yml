@@ -12,7 +12,7 @@ on:
       - "functions/**"
       - "public/**"
       - ".firebaserc"
-      - ".github/workflows/firebase-deploy.yml"
+      - "database/.github/workflows/firebase-deploy.yml"
   workflow_dispatch:
 
 jobs:
