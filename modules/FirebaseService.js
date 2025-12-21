@@ -44,11 +44,10 @@
     let auth = null;
     let db = null;
     let fs = null;
-    let fn = null;
+    \1    let firestoreSettingsApplied = false;
 
     let connected = false;
     let firestoreReady = false;
-
     let unsubAuth = null;
     let unsubConn = null;
     let firestoreTestInterval = null;
@@ -68,7 +67,7 @@
       let tokenResult = null;
       try {
         tokenResult = await user.getIdTokenResult(true);
-      } catch (_) {
+      } catch (e) {
         tokenResult = null;
       }
 
@@ -86,9 +85,11 @@
         try {
           const userDocRef = fs.collection('users').doc(user.uid);
           const userDoc = await userDocRef.get();
+
           if (userDoc.exists) {
             const userData = userDoc.data();
             const userLevel = userData && userData.level ? userData.level : null;
+
             if (userLevel) {
               store.set('userLevel', userLevel);
               ctx.userLevel = userLevel;
@@ -107,7 +108,6 @@
 
     function setupConnectivity() {
       if (!db) return;
-
       try {
         const connRef = db.ref('.info/connected');
         unsubConn = connRef.on('value', (snap) => {
@@ -124,8 +124,9 @@
 
     function teardownConnectivity() {
       if (!db || !unsubConn) return;
-
-      try { db.ref('.info/connected').off('value', unsubConn); } catch (_) {}
+      try {
+        db.ref('.info/connected').off('value', unsubConn);
+      } catch (_) {}
       unsubConn = null;
 
       if (firestoreTestInterval) {
@@ -138,6 +139,7 @@
       if (!fs) return false;
 
       try {
+        // Try to read from a test collection
         const testRef = fs.collection('_connection_test').doc('ping');
         await testRef.get();
 
@@ -162,8 +164,10 @@
     function setupFirestoreMonitoring() {
       if (!fs) return;
 
+      // Test connection immediately
       testFirestoreConnection();
 
+      // Test periodically (every 30 seconds)
       if (firestoreTestInterval) clearInterval(firestoreTestInterval);
       firestoreTestInterval = setInterval(() => {
         testFirestoreConnection();
@@ -188,7 +192,6 @@
       log('[Firebase] ========================================');
       log('[Firebase] INITIALIZING FIREBASE');
       log('[Firebase] ========================================');
-
       log('[Firebase] SDK Status:', {
         hasFirebase: typeof window.firebase !== 'undefined',
         hasAuth: typeof window.firebase?.auth === 'function',
@@ -226,26 +229,25 @@
         if (typeof window.firebase.firestore === 'function') {
           fs = window.firebase.firestore();
 
-          // Apply Firestore settings BEFORE any usage (best-effort).
-          // Do NOT re-apply if already applied or Firestore already started.
+          // CRITICAL: Apply Firestore settings BEFORE any usage
+          // This must be done exactly ONCE and BEFORE any Firestore operations
           try {
-            if (fs && !fs.__odinSettingsApplied) {
-              fs.__odinSettingsApplied = true;
+            log('[Firebase] Applying Firestore settings...');
+            fs.settings({
+              // Use long-polling instead of WebSocket for userscript compatibility
+              // WebSocket connections often fail in Tampermonkey/Greasemonkey environments
+              experimentalForceLongPolling: true,
 
-              log('[Firebase] Applying Firestore settings...');
-              fs.settings({
-                experimentalAutoDetectLongPolling: true,
-                experimentalForceLongPolling: true,
-                useFetchStreams: false,
-                ignoreUndefinedProperties: true
-              });
-
-              log('[Firebase] ✓ Firestore settings applied successfully');
-              log('[Firebase]   - Long-polling transport: ENABLED (userscript-safe)');
-              log('[Firebase]   - Ignore undefined properties: ENABLED');
-            }
+              // Ignore undefined properties to prevent write errors
+              ignoreUndefinedProperties: true
+            });
+            log('[Firebase] ✓ Firestore settings applied successfully');
+            log('[Firebase]   - Long-polling transport: ENABLED (userscript-safe)');
+            log('[Firebase]   - Ignore undefined properties: ENABLED');
           } catch (settingsErr) {
+            // Settings can only be applied once. If they fail, Firestore may already be initialized.
             log('[Firebase] WARNING: Could not apply Firestore settings:', settingsErr.message);
+            log('[Firebase] This may cause connection issues. If you see WebChannel errors, reload the page.');
           }
 
           log('[Firebase] ✓ Firestore initialized successfully');
@@ -258,8 +260,11 @@
         fs = null;
       }
 
-      // Initialize Functions with us-central1 region
+      // CRITICAL: Initialize Functions with us-central1 region
+      // Firebase compat SDK requires: firebase.app().functions('us-central1')
+      // This MUST match the server deployment region
       try {
+        // Validate Functions SDK is available
         if (!window.firebase.app) {
           throw new Error('firebase.app() is not available - Functions SDK not loaded');
         }
@@ -267,25 +272,35 @@
           throw new Error('firebase.app().functions() is not available - Functions SDK not loaded');
         }
 
+        // Initialize with explicit region
         fn = window.firebase.app().functions('us-central1');
-        if (!fn) throw new Error('Functions instance is null after initialization');
-        if (typeof fn.httpsCallable !== 'function') throw new Error('Functions instance missing httpsCallable method');
+
+        if (!fn) {
+          throw new Error('Functions instance is null after initialization');
+        }
+        if (typeof fn.httpsCallable !== 'function') {
+          throw new Error('Functions instance missing httpsCallable method');
+        }
 
         log('[Firebase] ✓ Functions initialized successfully');
-        log('[Firebase] ✓ Region: us-central1');
-        log('[Firebase] ✓ httpsCallable available:', typeof fn.httpsCallable);
+        log('[Firebase] ✓ Region: us-central1 (CRITICAL: must match server deployment)');
+        log('[Firebase] ✓ httpsCallable method available:', typeof fn.httpsCallable);
       } catch (e) {
         log('[Firebase] ========================================');
         log('[Firebase] CRITICAL ERROR: Functions initialization failed!');
         log('[Firebase] Error:', e.message);
         log('[Firebase] This will prevent authentication from working.');
+        log('[Firebase] Please ensure functions-compat.js is loaded in @require');
         log('[Firebase] ========================================');
         fn = null;
       }
 
       setupConnectivity();
 
-      if (fs) setupFirestoreMonitoring();
+      // Setup Firestore monitoring if available
+      if (fs) {
+        setupFirestoreMonitoring();
+      }
 
       if (!unsubAuth && auth) {
         try {
@@ -299,11 +314,9 @@
 
       store.set('firebase.initialized', true);
       store.set('firebase.available', true);
-
       log('[Firebase] ========================================');
       log('[Firebase] ✓ FIREBASE FULLY INITIALIZED');
       log('[Firebase] ========================================');
-
       return true;
     }
 
@@ -315,41 +328,174 @@
         log('[Firebase] Functions not initialized, attempting initialization...');
         initFirebase();
       }
-      if (!fn) throw new Error('Firebase Functions failed to initialize.');
 
-      const callable = fn.httpsCallable('authenticateWithTorn');
-      const res = await callable({ apiKey: key });
-
-      const token = res && res.data && res.data.token ? String(res.data.token) : '';
-      if (!token) {
-        const errorMsg = res && res.data && res.data.error ? res.data.error : 'Unknown error';
-        throw new Error('Authentication failed: ' + errorMsg);
+      if (!fn) {
+        throw new Error('Firebase Functions failed to initialize. Functions SDK may not be loaded. Check console for details.');
       }
 
-      // Wait for auth state to be fully established
-      const authPromise = new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error('Authentication timeout - user state not established')), 10000);
-        const unsubscribe = auth.onAuthStateChanged((user) => {
-          if (user) {
-            clearTimeout(timeout);
-            unsubscribe();
-            resolve(user);
-          }
+      log('[Firebase] ===== CALLING authenticateWithTorn =====');
+      log('[Firebase] ===== ENHANCED DIAGNOSTICS =====');
+      log('[Firebase] 1. Firebase SDK Status:', {
+        firebaseLoaded: typeof window.firebase !== 'undefined',
+        firebaseVersion: window.firebase?.SDK_VERSION || 'unknown',
+        hasApp: typeof window.firebase?.app === 'function',
+        hasFunctions: typeof window.firebase?.functions === 'function'
+      });
+      log('[Firebase] 2. Functions Instance Status:', {
+        functionInstanceExists: !!fn,
+        functionInstanceType: typeof fn,
+        hasHttpsCallable: !!(fn && typeof fn.httpsCallable === 'function'),
+        httpscallableType: typeof fn?.httpsCallable
+      });
+      log('[Firebase] 3. Region Configuration:', {
+        targetRegion: 'us-central1',
+        note: 'MUST match Cloud Run deployment region'
+      });
+      log('[Firebase] 4. Request Details:', {
+        apiKeyLength: key.length,
+        apiKeyFormat: /^[a-zA-Z0-9]{16}$/.test(key) ? 'valid' : 'invalid',
+        payload: { apiKey: '<redacted>' },
+        method: 'Firebase SDK httpsCallable (auto-wraps in { data: {...} })'
+      });
+
+      try {
+        // Validate callable is available before calling
+        if (typeof fn.httpsCallable !== 'function') {
+          throw new Error('fn.httpsCallable is not a function. Functions SDK may be corrupted.');
+        }
+
+        const callable = fn.httpsCallable('authenticateWithTorn');
+        log('[Firebase] ✓ Created httpsCallable for authenticateWithTorn');
+        log('[Firebase] ✓ Callable type:', typeof callable);
+        log('[Firebase] ✓ Invoking callable with payload: { apiKey: <' + key.length + ' chars> }');
+
+        const res = await callable({ apiKey: key });
+
+        log('[Firebase] ===== CLOUD FUNCTION RESPONSE =====');
+        log('[Firebase] Response received:', {
+          hasData: !!res.data,
+          dataKeys: res.data ? Object.keys(res.data) : [],
+          success: res.data?.success,
+          hasToken: !!(res.data?.token),
+          tokenLength: res.data?.token ? String(res.data.token).length : 0,
+          playerId: res.data?.playerId || 'N/A',
+          playerName: res.data?.playerName || 'N/A',
+          factionId: res.data?.factionId || 'N/A',
+          factionName: res.data?.factionName || 'N/A'
         });
-      });
 
-      await auth.signInWithCustomToken(token);
-      await authPromise;
+        const token = res && res.data && res.data.token ? String(res.data.token) : '';
+        if (!token) {
+          const errorMsg = res && res.data && res.data.error ? res.data.error : 'Unknown error';
+          log('[Firebase] ERROR: No token received from cloud function');
+          log('[Firebase] Full response object:', res);
+          throw new Error('Authentication failed: ' + errorMsg);
+        }
 
-      nexus.emit('AUTH_SUCCESS', {
-        uid: auth.currentUser?.uid,
-        playerId: res.data?.playerId,
-        playerName: res.data?.playerName,
-        factionId: res.data?.factionId,
-        factionName: res.data?.factionName
-      });
+        log('[Firebase] ✓ Token received (length: ' + token.length + ' chars)');
+        log('[Firebase] ✓ Player info: ' + (res.data.playerName || 'N/A') + ' [ID: ' + (res.data.playerId || 'N/A') + ']');
+        log('[Firebase] ✓ Faction: ' + (res.data.factionName || 'None') + ' [ID: ' + (res.data.factionId || 'N/A') + ']');
+        log('[Firebase] ✓ Signing in with custom token...');
 
-      return true;
+        // Wait for auth state to be fully established
+        const authPromise = new Promise((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            reject(new Error('Authentication timeout - user state not established'));
+          }, 10000); // 10 second timeout
+
+          const unsubscribe = auth.onAuthStateChanged((user) => {
+            if (user) {
+              clearTimeout(timeout);
+              unsubscribe();
+              log('[Firebase] ✓ Auth state changed, user authenticated:', user.uid);
+              resolve(user);
+            }
+          });
+        });
+
+        await auth.signInWithCustomToken(token);
+        log('[Firebase] ✓ signInWithCustomToken completed, waiting for auth state...');
+
+        const user = await authPromise; // Wait for the auth state to propagate
+
+        log('[Firebase] ===== AUTHENTICATION SUCCESSFUL =====');
+        log('[Firebase] ✓ Authenticated user UID:', user.uid);
+        log('[Firebase] ✓ Player: ' + (res.data.playerName || user.uid));
+        log('[Firebase] ✓ Faction: ' + (res.data.factionName || 'None'));
+        log('[Firebase] ✓ Database access granted');
+
+        // Emit success event with user info for UI
+        nexus.emit('AUTH_SUCCESS', {
+          uid: user.uid,
+          playerId: res.data?.playerId,
+          playerName: res.data?.playerName,
+          factionId: res.data?.factionId,
+          factionName: res.data?.factionName
+        });
+
+        return true;
+      } catch (error) {
+        log('[Firebase] ===== AUTHENTICATION ERROR =====');
+        log('[Firebase] ===== DETAILED ERROR OBJECT =====');
+        log('[Firebase] Error constructor:', error.constructor?.name || 'unknown');
+        log('[Firebase] Error code:', error.code || 'none');
+        log('[Firebase] Error message:', error.message || 'none');
+        log('[Firebase] Error name:', error.name || 'none');
+        log('[Firebase] All error fields:', {
+          code: error.code,
+          message: error.message,
+          name: error.name,
+          details: error.details,
+          customData: error.customData,
+          serverResponse: error.serverResponse,
+          status: error.status,
+          statusCode: error.statusCode,
+          stack: error.stack?.substring(0, 500)
+        });
+        log('[Firebase] Full error object keys:', Object.keys(error));
+        log('[Firebase] Error toString:', String(error));
+
+        // Extract meaningful error message from HttpsError
+        let errorMessage = 'Authentication failed';
+        let troubleshooting = '';
+
+        if (error.code === 'functions/not-found') {
+          errorMessage = 'Cloud function not found';
+          troubleshooting = 'Ensure authenticateWithTorn is deployed to us-central1 region.';
+        } else if (error.code === 'functions/internal') {
+          errorMessage = 'Server error: ' + (error.message || 'internal');
+          troubleshooting = 'Check Cloud Run logs for server-side errors. The function may have thrown an exception.';
+        } else if (error.code === 'functions/invalid-request') {
+          errorMessage = 'Invalid request format';
+          troubleshooting = 'The callable function received a non-callable request. Ensure you are using httpsCallable() not fetch/xhr.';
+        } else if (error.code === 'functions/unauthenticated') {
+          errorMessage = 'Authentication required';
+          troubleshooting = 'Check your API key.';
+        } else if (error.code === 'functions/permission-denied') {
+          errorMessage = 'Permission denied';
+          troubleshooting = 'Verify your access rights.';
+        } else if (error.code === 'functions/invalid-argument') {
+          errorMessage = error.message || 'Invalid API key format';
+          troubleshooting = 'Check your Torn API key is exactly 16 alphanumeric characters.';
+        } else if (error.code === 'functions/deadline-exceeded') {
+          errorMessage = 'Request timeout';
+          troubleshooting = 'Try again. The server may be slow or unreachable.';
+        } else if (error.code === 'functions/unavailable') {
+          errorMessage = 'Service temporarily unavailable';
+          troubleshooting = 'Try again later. The function may be deploying.';
+        } else if (error.message) {
+          errorMessage = error.message;
+        } else {
+          errorMessage = 'Unknown error: ' + String(error);
+        }
+
+        log('[Firebase] Human-readable error:', errorMessage);
+        if (troubleshooting) {
+          log('[Firebase] Troubleshooting:', troubleshooting);
+        }
+
+        throw new Error(errorMessage + (troubleshooting ? ' (' + troubleshooting + ')' : ''));
+      }
     }
 
     async function signOut() {
@@ -357,17 +503,22 @@
       await auth.signOut();
     }
 
-    function isConnected() { return !!connected; }
-    function getCurrentUser() { return auth ? auth.currentUser : null; }
+    function isConnected() {
+      return !!connected;
+    }
+
+    function getCurrentUser() {
+      return auth ? auth.currentUser : null;
+    }
 
     function ref(path) {
       if (!db) initFirebase();
       return db.ref(path);
     }
 
-    function isFirestoreReady() { return !!firestoreReady && !!fs; }
-
-    function firestore() { if (!fs) initFirebase(); return fs; }
+    function isFirestoreReady() {
+      return !!firestoreReady && !!fs;
+    }
 
     function collection(path) {
       if (!fs) {
@@ -386,26 +537,45 @@
     }
 
     async function getDoc(collectionPath, docId) {
-      const docRef = doc(collectionPath, docId);
+      if (!fs) {
+        initFirebase();
+        if (!fs) throw new Error('Firestore not available. Please load firestore-compat.js');
+      }
+      const docRef = fs.collection(collectionPath).doc(docId);
       const snapshot = await docRef.get();
       return snapshot.exists ? { id: snapshot.id, ...snapshot.data() } : null;
     }
 
     async function setDoc(collectionPath, docId, data, options = {}) {
-      const docRef = doc(collectionPath, docId);
-      if (options.merge) await docRef.set(data, { merge: true });
-      else await docRef.set(data);
+      if (!fs) {
+        initFirebase();
+        if (!fs) throw new Error('Firestore not available. Please load firestore-compat.js');
+      }
+      const docRef = fs.collection(collectionPath).doc(docId);
+      if (options.merge) {
+        await docRef.set(data, { merge: true });
+      } else {
+        await docRef.set(data);
+      }
       return true;
     }
 
     async function updateDoc(collectionPath, docId, data) {
-      const docRef = doc(collectionPath, docId);
+      if (!fs) {
+        initFirebase();
+        if (!fs) throw new Error('Firestore not available. Please load firestore-compat.js');
+      }
+      const docRef = fs.collection(collectionPath).doc(docId);
       await docRef.update(data);
       return true;
     }
 
     async function deleteDoc(collectionPath, docId) {
-      const docRef = doc(collectionPath, docId);
+      if (!fs) {
+        initFirebase();
+        if (!fs) throw new Error('Firestore not available. Please load firestore-compat.js');
+      }
+      const docRef = fs.collection(collectionPath).doc(docId);
       await docRef.delete();
       return true;
     }
@@ -415,12 +585,12 @@
         initFirebase();
         if (!fs) throw new Error('Firestore not available. Please load firestore-compat.js');
       }
-
       let query = fs.collection(collectionPath);
-      if (typeof queryFn === 'function') query = queryFn(query);
-
+      if (typeof queryFn === 'function') {
+        query = queryFn(query);
+      }
       const snapshot = await query.get();
-      return snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     }
 
     function onSnapshot(collectionOrDocPath, docId, callback, errorCallback) {
@@ -432,16 +602,21 @@
         }
       }
 
-      let refObj;
-      if (docId) refObj = fs.collection(collectionOrDocPath).doc(docId);
-      else refObj = fs.collection(collectionOrDocPath);
+      let ref;
+      if (docId) {
+        ref = fs.collection(collectionOrDocPath).doc(docId);
+      } else {
+        ref = fs.collection(collectionOrDocPath);
+      }
 
-      return refObj.onSnapshot(
+      return ref.onSnapshot(
         (snapshot) => {
           if (snapshot.docs) {
-            const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+            // Collection snapshot
+            const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             callback(docs);
           } else {
+            // Document snapshot
             const data = snapshot.exists ? { id: snapshot.id, ...snapshot.data() } : null;
             callback(data);
           }
@@ -461,8 +636,9 @@
       getCurrentUser,
       auth: function () { if (!auth) initFirebase(); return auth; },
       rtdb: function () { if (!db) initFirebase(); return db; },
-      firestore,
+      firestore: function () { if (!fs) initFirebase(); return fs; },
       ref,
+      // Firestore convenience methods
       collection,
       doc,
       getDoc,
@@ -484,6 +660,7 @@
 
     ctx.firebase = firebaseFacade;
     window.OdinFirebase = firebaseFacade;
+
     return { id: 'firebase-service', init: initFirebase, destroy };
   });
 })();
