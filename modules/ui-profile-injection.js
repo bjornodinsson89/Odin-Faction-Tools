@@ -52,15 +52,31 @@
   }
 
   function injectProfileButtons(playerId, ctx) {
+    const log = ctx.log || console.log;
+
     // Check if buttons already exist
     if (document.querySelector('.odin-profile-buttons')) {
+      log('[ProfileInjection] Buttons already exist for player', playerId);
       return;
     }
 
+    log('[ProfileInjection] ========================================');
+    log('[ProfileInjection] INJECTING PROFILE BUTTONS');
+    log('[ProfileInjection] Player ID:', playerId);
+    log('[ProfileInjection] ========================================');
+
     const header = findProfileHeader();
     if (!header) {
+      log('[ProfileInjection] ❌ Profile header not found - cannot inject buttons');
+      log('[ProfileInjection] Tried selectors:');
+      log('[ProfileInjection]   - .profile-container .profile-wrapper .basic-information');
+      log('[ProfileInjection]   - .profile-wrapper .basic-information');
+      log('[ProfileInjection]   - [class*="basic-information"]');
+      log('[ProfileInjection]   - .content-title');
       return;
     }
+
+    log('[ProfileInjection] ✓ Profile header found:', header.className);
 
     // Create button container
     const buttonContainer = document.createElement('div');
@@ -140,6 +156,8 @@
     buttonContainer.appendChild(claimBtn);
     buttonContainer.appendChild(targetBtn);
 
+    log('[ProfileInjection] ✓ Created 2 buttons (Claim, Add Target)');
+
     // Find a good place to insert the buttons
     // Try to find the name element
     const nameElement = header.querySelector('h4') || header.querySelector('.title-black') || header;
@@ -151,10 +169,19 @@
       } else {
         nameElement.parentNode.appendChild(buttonContainer);
       }
+      log('[ProfileInjection] ✓ Buttons inserted after name element');
     } else {
       // Fallback: append to header
       header.appendChild(buttonContainer);
+      log('[ProfileInjection] ✓ Buttons appended to header');
     }
+
+    log('[ProfileInjection] ========================================');
+    log('[ProfileInjection] ✓ PROFILE BUTTONS INJECTED SUCCESSFULLY');
+    log('[ProfileInjection] ✓ Player:', playerId);
+    log('[ProfileInjection] ✓ Button count: 2');
+    log('[ProfileInjection] ✓ Event handlers: CLAIM_TARGET, ADD_TARGET');
+    log('[ProfileInjection] ========================================');
   }
 
   function showProfileToast(message, type = 'info') {
@@ -264,14 +291,32 @@
     }
 
     function init() {
-      hookHistory();
+      log('[ProfileInjection] ========================================');
+      log('[ProfileInjection] INITIALIZING PROFILE INJECTION');
+      log('[ProfileInjection] ========================================');
 
+      log('[ProfileInjection] Step 1/3: Hooking history API...');
+      hookHistory();
+      log('[ProfileInjection] ✓ History hooks installed (pushState, replaceState)');
+
+      log('[ProfileInjection] Step 2/3: Starting DOM observer...');
       const obs = startObserver();
+      log('[ProfileInjection] ✓ MutationObserver active');
+
+      log('[ProfileInjection] Step 3/3: Running initial page scan...');
       // Initial scan
       onUrlMaybeChanged('init');
+      log('[ProfileInjection] ✓ Initial scan complete');
 
       // Periodic sanity scan (lightweight)
+      log('[ProfileInjection] Starting periodic scan (every 2.5s)...');
       const t = setInterval(() => onUrlMaybeChanged('interval'), 2500);
+      log('[ProfileInjection] ✓ Periodic scan active');
+
+      log('[ProfileInjection] ========================================');
+      log('[ProfileInjection] ✓ PROFILE INJECTION READY');
+      log('[ProfileInjection] ✓ Will inject buttons on Torn profile pages');
+      log('[ProfileInjection] ========================================');
 
       nexus.emit('PROFILE_INJECTION_READY', { ok: true });
 

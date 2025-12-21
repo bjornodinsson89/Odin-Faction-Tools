@@ -2030,11 +2030,21 @@
     // MODULE LIFECYCLE
     // ============================================
     function init() {
-      log('[UIManager] Initializing v' + UI_VERSION);
+      log('[UIManager] ========================================');
+      log('[UIManager] INITIALIZING UI MANAGER v' + UI_VERSION);
+      log('[UIManager] ========================================');
 
+      log('[UIManager] Step 1/3: Injecting CSS styles...');
       injectStyles();
+      log('[UIManager] ✓ Styles injected');
+
+      log('[UIManager] Step 2/3: Creating toggle button...');
       createToggleButton();
+      log('[UIManager] ✓ Toggle button created (should be visible bottom-left)');
+
+      log('[UIManager] Step 3/3: Creating main panel...');
       createPanel();
+      log('[UIManager] ✓ Main panel created (hidden until toggle clicked)');
 
       // Subscribe to state changes
       nexus.on?.('STATE_CHANGED', () => {
@@ -2086,7 +2096,16 @@
         showToast(message, 'success');
       });
 
-      log('[UIManager] Ready');
+      // Listen for Firebase unavailable event
+      nexus.on?.('FIREBASE_UNAVAILABLE', () => {
+        log('[UIManager] Firebase unavailable - UI will work in offline mode');
+      });
+
+      log('[UIManager] ========================================');
+      log('[UIManager] ✓ UI MANAGER READY');
+      log('[UIManager] ✓ Event listeners registered');
+      log('[UIManager] ✓ Toggle button active');
+      log('[UIManager] ========================================');
     }
 
     function destroy() {

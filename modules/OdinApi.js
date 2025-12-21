@@ -298,6 +298,13 @@
         cached: false
       });
 
+      // VISIBLE LOGGING: Log API call to console for diagnostics
+      const redactedKey = tornApiKey ? (tornApiKey.slice(0, 4) + '••••' + tornApiKey.slice(-4)) : '<none>';
+      log('[API] ⬆️ TORN API REQUEST:', endpoint);
+      log('[API]   → URL:', CONFIG.torn.baseUrl + endpoint);
+      log('[API]   → Selections:', selections || 'none');
+      log('[API]   → API Key:', redactedKey);
+
       try {
         const data = await requestWithRetry(url);
         const duration = Math.round(performance.now() - startTime);
@@ -306,9 +313,18 @@
         logEntry.ms = duration;
         logApiCall(logEntry);
 
+        // VISIBLE LOGGING: Log successful API response
+        log('[API] ⬇️ TORN API RESPONSE:', endpoint, '(' + duration + 'ms)');
+        log('[API]   ✓ Success - Data received');
+
         if (data && data.error) {
           const err = new Error(`Torn API Error: ${data.error.error || data.error.message || 'Unknown'}`);
           err.code = data.error.code;
+
+          // VISIBLE LOGGING: Log API error
+          error('[API] ❌ TORN API ERROR:', endpoint);
+          error('[API]   → Error code:', data.error.code);
+          error('[API]   → Error message:', data.error.error || data.error.message);
 
           // Emit API call error event
           nexus.emit?.('API_CALL_ERROR', {
@@ -343,6 +359,11 @@
         logEntry.ms = duration;
         logEntry.error = e.message;
         logApiCall(logEntry);
+
+        // VISIBLE LOGGING: Log network/request error
+        error('[API] ❌ TORN API REQUEST FAILED:', endpoint);
+        error('[API]   → Error:', e.message);
+        error('[API]   → Duration:', duration + 'ms');
 
         // Emit API call error event
         nexus.emit?.('API_CALL_ERROR', {
