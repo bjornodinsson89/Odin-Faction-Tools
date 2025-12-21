@@ -1,10 +1,5 @@
 /**
  * Odin Tools - Action Handler Module
- * Handles user actions like adding targets, claiming targets, notes, etc.
- * OFFLINE-TOLERANT:
- *  - Always updates local storage immediately
- *  - Mirrors storage state into ctx.store so UI updates instantly
- *  - Emits Nexus events for other modules
  * Version: 1.1.0
  * Author: BjornOdinsson89
  */
@@ -21,7 +16,7 @@
     const storage = ctx.storage || { getJSON: () => null, setJSON: () => {} };
     const store = ctx.store || { set: () => {}, get: () => {} };
 
-    const ACTION_VERSION = '5.1.0';
+    const ACTION_VERSION = '1.1.0';
 
     // ============================================
     // LOCAL <-> STORE SYNC
@@ -105,24 +100,6 @@
 
               targets[targetId].factionName = factionName;
               targets[targetId].lastUpdated = Date.now();
-
-              // Score target with Freki AI
-              if (ctx.freki && typeof ctx.freki.analyzeTarget === 'function') {
-                try {
-                  log('[ActionHandler] Scoring target with Freki AI:', targetId);
-                  const analysis = await ctx.freki.analyzeTarget(targetId, profile);
-                  if (analysis && typeof analysis.winProbability === 'number') {
-                    // Convert win probability (0-1) to score (0-100)
-                    targets[targetId].frekiScore = Math.round(analysis.winProbability * 100);
-                    log('[ActionHandler] Freki score for', targetId, ':', targets[targetId].frekiScore);
-                  }
-                } catch (frekiErr) {
-                  log('[ActionHandler] Freki scoring failed (non-fatal):', frekiErr && frekiErr.message ? frekiErr.message : frekiErr);
-                  targets[targetId].frekiScore = 0;
-                }
-              } else {
-                targets[targetId].frekiScore = 0;
-              }
 
               saveTargets(targets);
               nexus.emit('TARGET_INFO_UPDATED', { targetId, target: targets[targetId] });
@@ -232,116 +209,7 @@
         nexus.emit('TARGET_REMOVE_FAILED', { targetId, error: e && e.message ? e.message : String(e) });
       }
     }
-
-    // ============================================
-    // SCHEDULE SIGNUP HANDLER
-    // ============================================
-    async function handleSignUpSlot(payload) {
-      const { day, hour } = payload || {};
-      if (day === undefined || hour === undefined) return;
-
-      log('[ActionHandler] Sign up for slot:', { day, hour });
-
-      try {
-        const uid = ctx?.firebase?.getCurrentUser?.()?.uid || 'local';
-        const userName = ctx?.store?.get('userName') || 'User';
-        const schedule = storage.getJSON('odin_schedule', {}) || {};
-
-        // Initialize day if not exists
-        if (!schedule[day]) schedule[day] = {};
-
-        // Add user to the slot
-        schedule[day][hour] = {
-          playerId: uid,
-          playerName: userName,
-          signedUpAt: Date.now()
-        };
-
-        // Save to storage
-        storage.setJSON('odin_schedule', schedule);
-        store.set('watcherSchedule', schedule);
-
-        nexus.emit('SLOT_SIGNED_UP', { day, hour, playerId: uid });
-
-        // Best-effort backend sync if available
-        if (ctx.firebase && typeof ctx.firebase.setDoc === 'function') {
-          try {
-            const factionId = ctx?.store?.get('auth.factionId');
-            if (factionId) {
-              await ctx.firebase.setDoc(
-                `factions/${factionId}/schedule`,
-                `${day}_${hour}`,
-                {
-                  day,
-                  hour,
-                  playerId: uid,
-                  playerName: userName,
-                  signedUpAt: Date.now()
-                },
-                { merge: true }
-              );
-            }
-          } catch (e) {
-            // Non-fatal: queue handled in FirebaseService
-          }
-        }
-      } catch (e) {
-        log('[ActionHandler] Sign up slot error:', e && e.message ? e.message : e);
-        nexus.emit('SLOT_SIGNUP_FAILED', { day, hour, error: e && e.message ? e.message : String(e) });
-      }
-    }
-
-    // ============================================
-    // PROFILE VIEW HANDLER (UI -> API Bridge)
-    // ============================================
-    /**
-     * Handles PROFILE_VIEW_READY events from ui-profile-injection
-     * This is the bridge between UI detection and API data fetching
-     */
-    async function handleProfileViewReady(payload) {
-      const { playerId, url } = payload || {};
-      if (!playerId || playerId === 'unknown') return;
-
-      log('[ActionHandler] Profile view detected for player:', playerId);
-
-      // Emit event to notify UI that a profile was detected
-      nexus.emit('PROFILE_DETECTED', { playerId, url });
-
-      // Fetch profile data to populate cache (best-effort, non-blocking)
-      if (ctx.api && typeof ctx.api.getUserProfile === 'function') {
-        try {
-          log('[ActionHandler] Fetching profile data for:', playerId);
-          const profile = await ctx.api.getUserProfile(playerId);
-
-          if (profile) {
-            // Update store with profile data
-            const profileData = {
-              id: playerId,
-              name: profile.name || null,
-              level: profile.level || null,
-              factionId: profile.faction?.faction_id || null,
-              factionName: profile.faction?.faction_name || profile.faction?.name || null,
-              lastAction: profile.last_action || null,
-              status: profile.status || null,
-              fetchedAt: Date.now()
-            };
-
-            // Store in ctx.store for UI access
-            const profiles = store.get('profiles') || {};
-            profiles[playerId] = profileData;
-            store.set('profiles', profiles);
-
-            // Emit profile data event
-            nexus.emit('PROFILE_DATA_LOADED', { playerId, profile: profileData });
-            log('[ActionHandler] Profile data loaded and stored for:', playerId);
-          }
-        } catch (e) {
-          log('[ActionHandler] Failed to fetch profile data (non-fatal):', e && e.message ? e.message : e);
-        }
-      }
-    }
-
-    // ============================================
+// ============================================
     // EVENT WIRING
     // ============================================
     const offAdd = nexus.on ? nexus.on('ADD_TARGET', handleAddTarget) : null;
@@ -349,8 +217,6 @@
     const offUnclaim = nexus.on ? nexus.on('UNCLAIM_TARGET', handleUnclaimTarget) : null;
     const offRelease = nexus.on ? nexus.on('RELEASE_CLAIM', handleUnclaimTarget) : null;
     const offRemove = nexus.on ? nexus.on('REMOVE_TARGET', handleRemoveTarget) : null;
-    const offProfileView = nexus.on ? nexus.on('PROFILE_VIEW_READY', handleProfileViewReady) : null;
-    const offSignUpSlot = nexus.on ? nexus.on('SIGN_UP_SLOT', handleSignUpSlot) : null;
 
     function destroy() {
       try { if (typeof offAdd === 'function') offAdd(); } catch (_) {}
@@ -358,8 +224,6 @@
       try { if (typeof offUnclaim === 'function') offUnclaim(); } catch (_) {}
       try { if (typeof offRelease === 'function') offRelease(); } catch (_) {}
       try { if (typeof offRemove === 'function') offRemove(); } catch (_) {}
-      try { if (typeof offProfileView === 'function') offProfileView(); } catch (_) {}
-      try { if (typeof offSignUpSlot === 'function') offSignUpSlot(); } catch (_) {}
     }
 
     return {
