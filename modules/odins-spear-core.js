@@ -38,9 +38,27 @@
 
     function emit(event, payload) {
       const s = listeners.get(event);
-      if (!s || s.size === 0) return;
+      if (!s || s.size === 0) {
+        // Log events with no listeners for debugging
+        if (event && !event.startsWith('STATE_CHANGED')) {
+          console.debug('[Nexus] Event emitted with no listeners:', event);
+        }
+        return;
+      }
+
+      // Log event emissions for debugging (except high-frequency events)
+      if (!event.startsWith('STATE_CHANGED')) {
+        console.debug('[Nexus] 📡 Event:', event, payload ? '(with payload)' : '');
+      }
+
       Array.from(s).forEach((fn) => {
-        try { fn(payload); } catch (e) { console.error('[Odin:Nexus] listener error', event, e); }
+        try {
+          fn(payload);
+        } catch (e) {
+          console.error('[Nexus] ❌ Listener error for event:', event);
+          console.error('[Nexus]   → Error:', e.message || e);
+          console.error('[Nexus]   → Stack:', e.stack);
+        }
       });
     }
 
@@ -254,35 +272,48 @@ ctx.spear = ctx.spear || {
         const modInit = mods[i];
         try {
           if (typeof modInit !== 'function') {
-            ctx.warn('[OdinsSpear] Module ' + (i + 1) + ' is not a function, skipping');
+            ctx.warn('[OdinsSpear] ⚠️ Module ' + (i + 1) + ' is not a function, skipping');
             continue;
           }
 
-          ctx.log('[OdinsSpear] [' + (i + 1) + '/' + mods.length + '] Initializing module...');
+          ctx.log('[OdinsSpear] [' + (i + 1) + '/' + mods.length + '] 🔧 Initializing module...');
 
           const handle = modInit(ctx);
           const moduleId = (handle && handle.id) || '(anonymous)';
 
-          ctx.log('[OdinsSpear] [' + (i + 1) + '/' + mods.length + '] Module loaded:', moduleId);
+          ctx.log('[OdinsSpear] [' + (i + 1) + '/' + mods.length + '] 📦 Module loaded:', moduleId);
 
           if (handle && typeof handle.init === 'function') {
-            ctx.log('[OdinsSpear] [' + (i + 1) + '/' + mods.length + '] Calling init() for:', moduleId);
+            ctx.log('[OdinsSpear] [' + (i + 1) + '/' + mods.length + '] ⚙️ Calling init() for:', moduleId);
+
+            // CRITICAL: Module init() should be synchronous and non-blocking
+            // Any async operations (like Firebase connection) should happen in the background
+            const initStartTime = Date.now();
             handle.init();
-            ctx.log('[OdinsSpear] [' + (i + 1) + '/' + mods.length + '] ✓ Initialized:', moduleId);
+            const initDuration = Date.now() - initStartTime;
+
+            if (initDuration > 100) {
+              ctx.warn('[OdinsSpear] ⚠️ Module init took', initDuration, 'ms:', moduleId);
+            }
+
+            ctx.log('[OdinsSpear] [' + (i + 1) + '/' + mods.length + '] ✓ Initialized:', moduleId, '(' + initDuration + 'ms)');
           } else {
-            ctx.log('[OdinsSpear] [' + (i + 1) + '/' + mods.length + '] No init() method for:', moduleId);
+            ctx.log('[OdinsSpear] [' + (i + 1) + '/' + mods.length + '] ⚠️ No init() method for:', moduleId);
           }
 
           handles.push(handle || { id: moduleId });
           ctx.nexus.emit('MODULE_READY', { id: moduleId });
         } catch (e) {
           ctx.error('[OdinsSpear] ========================================');
-          ctx.error('[OdinsSpear] MODULE INITIALIZATION ERROR!');
+          ctx.error('[OdinsSpear] ❌ MODULE INITIALIZATION ERROR!');
           ctx.error('[OdinsSpear] Module index:', i + 1);
-          ctx.error('[OdinsSpear] Error:', e.message);
+          ctx.error('[OdinsSpear] Error:', e.message || e);
           ctx.error('[OdinsSpear] Stack:', e.stack);
           ctx.error('[OdinsSpear] ========================================');
           ctx.nexus.emit('MODULE_ERROR', { error: String(e && e.message ? e.message : e), index: i });
+
+          // Continue with other modules even if one fails (resilience)
+          ctx.warn('[OdinsSpear] ⚠️ Continuing with remaining modules...');
         }
       }
 
