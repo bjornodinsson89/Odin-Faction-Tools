@@ -13,6 +13,7 @@
   window.OdinModules.push(function OdinApiModuleInit(OdinContext) {
     const ctx = OdinContext || {};
     const storage = ctx.storage || { getJSON: () => null, setJSON: () => {}, get: () => null, set: () => {} };
+    const store = ctx.store || { get: () => null, set: () => {}, update: () => {} };
     const nexus = ctx.nexus || { emit: () => {}, on: () => () => {} };
     const log = ctx.log || console.log;
     const error = ctx.error || console.error;
@@ -1102,55 +1103,70 @@
     // CONFIGURATION SETTERS
     // ============================================
     function setTornApiKey(key, opts) {
-      const o = opts || {};
-      tornApiKey = (key == null) ? '' : String(key).trim();
-      if (o.persist !== false) secretSet('tornApiKey', tornApiKey);
-      store.set('api.tornKey', tornApiKey); // Update store for UI
-      if (!o.silent) log('[API] Torn API key set');
+      try {
+        const o = opts || {};
+        tornApiKey = (key == null) ? '' : String(key).trim();
+        if (o.persist !== false) secretSet('tornApiKey', tornApiKey);
+        try { store.set('api.tornKey', tornApiKey); } catch (e) { error('[API] Store update failed:', e); }
+        if (!o.silent) log('[API] Torn API key set');
 
-      // Key info (owner/user id) is useful for local dev-unlock and UI gating.
-      // Debounced + in-flight de-duped by the request layer.
-      if (tornApiKey && o.validate !== false) {
-        debounceRequest('torn:keyinfo', async () => {
-          try {
-            const infoResp = await validateTornApiKey();
-            store.set('api.torn.keyInfo', infoResp);
+        // Key info (owner/user id) is useful for local dev-unlock and UI gating.
+        // Debounced + in-flight de-duped by the request layer.
+        if (tornApiKey && o.validate !== false) {
+          debounceRequest('torn:keyinfo', async () => {
+            try {
+              const infoResp = await validateTornApiKey();
+              try { store.set('api.torn.keyInfo', infoResp); } catch (e) { error('[API] Store update failed:', e); }
 
-            const inferredId = (infoResp && typeof infoResp === 'object')
-              ? (infoResp.info?.id || infoResp.info?.user_id || infoResp.player_id || infoResp.user_id)
-              : null;
+              const inferredId = (infoResp && typeof infoResp === 'object')
+                ? (infoResp.info?.id || infoResp.info?.user_id || infoResp.player_id || infoResp.user_id)
+                : null;
 
-            if (inferredId != null) {
-              const idStr = String(inferredId);
-              store.set('api.torn.userId', idStr);
-              // If Firebase auth isn't established, still expose tornId for local-only dev unlock.
-              if (!store.get('auth.uid')) store.set('auth.tornId', idStr);
+              if (inferredId != null) {
+                const idStr = String(inferredId);
+                try { store.set('api.torn.userId', idStr); } catch (e) { error('[API] Store update failed:', e); }
+                // If Firebase auth isn't established, still expose tornId for local-only dev unlock.
+                try { if (!store.get('auth.uid')) store.set('auth.tornId', idStr); } catch (e) { error('[API] Store update failed:', e); }
+              }
+            } catch (e) {
+              error('[API] Key validation failed:', e);
             }
-          } catch (_) {
-            // ignore validation failures; UI can still function in local mode
-          }
-        });
-      }
+          });
+        }
 
-      try { nexus.emit?.('API_KEYS_UPDATED', { service: 'torn', hasKey: !!tornApiKey }); } catch (_) {}
+        try { nexus.emit?.('API_KEYS_UPDATED', { service: 'torn', hasKey: !!tornApiKey }); } catch (_) {}
+      } catch (e) {
+        error('[API] Failed to set Torn API key:', e);
+        throw e;
+      }
     }
 
     function setTornStatsApiKey(key, opts) {
-      const o = opts || {};
-      tornStatsApiKey = (key == null) ? '' : String(key).trim();
-      if (o.persist !== false) secretSet('tornStatsApiKey', tornStatsApiKey);
-      store.set('api.tornStatsKey', tornStatsApiKey); // Update store for UI
-      if (!o.silent) log('[API] TornStats API key set');
-      try { nexus.emit?.('API_KEYS_UPDATED', { service: 'tornStats', hasKey: !!tornStatsApiKey }); } catch (_) {}
+      try {
+        const o = opts || {};
+        tornStatsApiKey = (key == null) ? '' : String(key).trim();
+        if (o.persist !== false) secretSet('tornStatsApiKey', tornStatsApiKey);
+        try { store.set('api.tornStatsKey', tornStatsApiKey); } catch (e) { error('[API] Store update failed:', e); }
+        if (!o.silent) log('[API] TornStats API key set');
+        try { nexus.emit?.('API_KEYS_UPDATED', { service: 'tornStats', hasKey: !!tornStatsApiKey }); } catch (_) {}
+      } catch (e) {
+        error('[API] Failed to set TornStats API key:', e);
+        throw e;
+      }
     }
 
     function setFFScouterApiKey(key, opts) {
-      const o = opts || {};
-      ffScouterApiKey = (key == null) ? '' : String(key).trim();
-      if (o.persist !== false) secretSet('ffScouterApiKey', ffScouterApiKey);
-      store.set('api.ffScouterKey', ffScouterApiKey); // Update store for UI
-      if (!o.silent) log('[API] FFScouter API key set');
-      try { nexus.emit?.('API_KEYS_UPDATED', { service: 'ffScouter', hasKey: !!ffScouterApiKey }); } catch (_) {}
+      try {
+        const o = opts || {};
+        ffScouterApiKey = (key == null) ? '' : String(key).trim();
+        if (o.persist !== false) secretSet('ffScouterApiKey', ffScouterApiKey);
+        try { store.set('api.ffScouterKey', ffScouterApiKey); } catch (e) { error('[API] Store update failed:', e); }
+        if (!o.silent) log('[API] FFScouter API key set');
+        try { nexus.emit?.('API_KEYS_UPDATED', { service: 'ffScouter', hasKey: !!ffScouterApiKey }); } catch (_) {}
+      } catch (e) {
+        error('[API] Failed to set FFScouter API key:', e);
+        throw e;
+      }
     }
 
     function getTornApiKey() {
