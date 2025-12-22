@@ -1100,15 +1100,6 @@ const onlineMembers = Object.values(presence).filter(p => p.status === 'online')
             </button>
           </div>
         </div>
-
-        <div class="odin-card">
-          <div class="odin-card-header">
-            <div class="odin-card-title">📋 Recent Activity</div>
-          </div>
-          <div style="font-size: 12px; color: #a0a0a0;">
-            ${renderRecentActivity()}
-          </div>
-        </div>
       `;
     }
 
@@ -1586,6 +1577,15 @@ const onlineMembers = Object.values(presence).filter(p => p.status === 'online')
             <div style="margin-top: 8px;">
               Role: ${ctx.access?.getEffectiveRole?.() || 'Unknown'}
             </div>
+          </div>
+        </div>
+
+        <div class="odin-card">
+          <div class="odin-card-header">
+            <div class="odin-card-title">📋 Recent Activity</div>
+          </div>
+          <div style="font-size: 12px; color: #a0a0a0;">
+            ${renderRecentActivity()}
           </div>
         </div>
 
