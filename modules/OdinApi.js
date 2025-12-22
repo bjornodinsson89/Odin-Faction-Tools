@@ -85,9 +85,16 @@
     function secretSet(k, val) {
       const kk = _skey(k);
       try {
-        if (_hasGMSecret) GM_setValue(kk, val);
-        else localStorage.setItem(kk, String(val));
-      } catch (_) {}
+        if (_hasGMSecret) {
+          GM_setValue(kk, val);
+          log('[API] ✓ Saved ' + k + ' to GM storage');
+        } else {
+          localStorage.setItem(kk, String(val));
+          log('[API] ✓ Saved ' + k + ' to localStorage');
+        }
+      } catch (e) {
+        log('[API] ✗ Failed to save ' + k + ':', e.message || e);
+      }
     }
 
     function secretDel(k) {
@@ -354,6 +361,7 @@
           if (data && data.error) {
             const err = new Error(`Torn API Error: ${data.error.error || data.error.message || 'Unknown'}`);
             err.code = data.error.code;
+            err.__apiErrorEmitted = true; // Mark that we already emitted the error event
 
             // VISIBLE LOGGING: Log API error
             error('[API] ❌ TORN API ERROR:', endpoint);
@@ -394,6 +402,9 @@
           logEntry.error = e.message;
           logApiCall(logEntry);
 
+          // Check if error event was already emitted (for API errors in response data)
+          const alreadyEmitted = e.__apiErrorEmitted === true;
+
           // RESILIENCE: Try to return cached data if available
           const cachedFallback = getCached(cacheKey, 3600000); // Accept stale cache up to 1 hour old
           if (cachedFallback) {
@@ -401,16 +412,18 @@
             console.warn('[API]   → Error:', e.message);
             console.warn('[API]   → Using cached data from storage');
 
-            // Emit API call error event with fallback flag
-            nexus.emit?.('API_CALL_ERROR', {
-              service: 'torn',
-              endpoint: endpoint,
-              url: url,
-              method: 'GET',
-              error: e.message,
-              duration: duration,
-              fallbackUsed: true
-            });
+            // Only emit error event if not already emitted
+            if (!alreadyEmitted) {
+              nexus.emit?.('API_CALL_ERROR', {
+                service: 'torn',
+                endpoint: endpoint,
+                url: url,
+                method: 'GET',
+                error: e.message,
+                duration: duration,
+                fallbackUsed: true
+              });
+            }
 
             return cachedFallback;
           }
@@ -420,16 +433,18 @@
           error('[API]   → Error:', e.message);
           error('[API]   → Duration:', duration + 'ms');
 
-          // Emit API call error event
-          nexus.emit?.('API_CALL_ERROR', {
-            service: 'torn',
-            endpoint: endpoint,
-            url: url,
-            method: 'GET',
-            error: e.message,
-            duration: duration,
-            fallbackUsed: false
-          });
+          // Only emit error event if not already emitted
+          if (!alreadyEmitted) {
+            nexus.emit?.('API_CALL_ERROR', {
+              service: 'torn',
+              endpoint: endpoint,
+              url: url,
+              method: 'GET',
+              error: e.message,
+              duration: duration,
+              fallbackUsed: false
+            });
+          }
 
           throw e;
         }
@@ -1090,6 +1105,7 @@
       const o = opts || {};
       tornApiKey = (key == null) ? '' : String(key).trim();
       if (o.persist !== false) secretSet('tornApiKey', tornApiKey);
+      store.set('api.tornKey', tornApiKey); // Update store for UI
       if (!o.silent) log('[API] Torn API key set');
 
       // Key info (owner/user id) is useful for local dev-unlock and UI gating.
@@ -1123,6 +1139,7 @@
       const o = opts || {};
       tornStatsApiKey = (key == null) ? '' : String(key).trim();
       if (o.persist !== false) secretSet('tornStatsApiKey', tornStatsApiKey);
+      store.set('api.tornStatsKey', tornStatsApiKey); // Update store for UI
       if (!o.silent) log('[API] TornStats API key set');
       try { nexus.emit?.('API_KEYS_UPDATED', { service: 'tornStats', hasKey: !!tornStatsApiKey }); } catch (_) {}
     }
@@ -1131,6 +1148,7 @@
       const o = opts || {};
       ffScouterApiKey = (key == null) ? '' : String(key).trim();
       if (o.persist !== false) secretSet('ffScouterApiKey', ffScouterApiKey);
+      store.set('api.ffScouterKey', ffScouterApiKey); // Update store for UI
       if (!o.silent) log('[API] FFScouter API key set');
       try { nexus.emit?.('API_KEYS_UPDATED', { service: 'ffScouter', hasKey: !!ffScouterApiKey }); } catch (_) {}
     }
@@ -1306,9 +1324,10 @@
     // This keeps UI modules free of direct API calls.
     nexus.on('SET_API_KEYS', (payload) => {
       const p = (payload && typeof payload === 'object') ? payload : {};
-      if (typeof p.tornKey === 'string') setTornApiKey(p.tornKey);
-      if (typeof p.tornStatsKey === 'string') setTornStatsApiKey(p.tornStatsKey);
-      if (typeof p.ffScouterKey === 'string') setFFScouterApiKey(p.ffScouterKey);
+      // Only save keys that are non-empty strings (don't overwrite with empty values)
+      if (typeof p.tornKey === 'string' && p.tornKey.trim()) setTornApiKey(p.tornKey);
+      if (typeof p.tornStatsKey === 'string' && p.tornStatsKey.trim()) setTornStatsApiKey(p.tornStatsKey);
+      if (typeof p.ffScouterKey === 'string' && p.ffScouterKey.trim()) setFFScouterApiKey(p.ffScouterKey);
       nexus.emit('API_KEYS_UPDATED', {
         hasTornKey: !!store.get('api.tornKey'),
         hasTornStatsKey: !!store.get('api.tornStatsKey'),
