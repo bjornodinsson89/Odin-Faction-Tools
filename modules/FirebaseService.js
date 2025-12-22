@@ -46,21 +46,25 @@
 
     function applyFirestoreSettingsOnce(fs, logFn) {
     if (!fs || typeof fs.settings !== 'function') return;
-    if (window.__ODIN_FS_INIT__ === true) return;
+    if (window.__ODIN_FS_INIT__ === true) {
+      if (logFn) logFn('[Firebase] Firestore settings already applied (skipping to prevent host override)');
+      return;
+    }
     try {
       fs.settings({
-        // These options are critical for userscript/mobile environments
-        experimentalAutoDetectLongPolling: true,
+        // CRITICAL: These options are required for userscript/mobile environments
+        // experimentalAutoDetectLongPolling MUST be false to prevent "host override" errors
+        experimentalAutoDetectLongPolling: false,
         experimentalForceLongPolling: true,
         useFetchStreams: false,
         ignoreUndefinedProperties: true
       });
       window.__ODIN_FS_INIT__ = true;
-      if (logFn) logFn('[Firebase] ✓ Firestore settings applied (userscript-safe)');
+      if (logFn) logFn('[Firebase] ✓ Firestore settings applied (userscript-safe with forced long polling)');
     } catch (e) {
       // Settings can only be applied before Firestore is used. If this fails, do not keep retrying.
       window.__ODIN_FS_INIT__ = true;
-      if (logFn) logFn('[Firebase] WARNING: Could not apply Firestore settings:', e.message);
+      if (logFn) logFn('[Firebase] WARNING: Could not apply Firestore settings (non-fatal):', e.message);
     }
   }
 
@@ -291,10 +295,13 @@ window.OdinModules.push(function FirebaseServiceModuleInit(ctx) {
     }
 
     function initFirebase() {
+      console.log('[Firebase] 🔧 Initializing Firebase service (silent mode)...');
+
       try {
         ensureFirebaseCompat();
       } catch (e) {
-        log('[Firebase] Firebase SDK NOT LOADED (offline mode):', e.message);
+        // SILENT MODE: Don't throw, just log and continue
+        console.warn('[Firebase] ⚠️ Firebase SDK not loaded (local-only mode):', e.message);
         store?.set?.('firebase.initialized', false);
         store?.set?.('firebase.available', false);
         nexus?.emit?.('FIREBASE_UNAVAILABLE', { error: e.message });
@@ -304,16 +311,17 @@ window.OdinModules.push(function FirebaseServiceModuleInit(ctx) {
       try {
         if (!window.firebase.apps || window.firebase.apps.length === 0) {
           app = window.firebase.initializeApp(firebaseConfig);
-          log('[Firebase] ✓ Firebase app initialized');
+          console.log('[Firebase] ✓ Firebase app initialized');
         } else {
           app = window.firebase.app();
-          log('[Firebase] ✓ Using existing Firebase app');
+          console.log('[Firebase] ✓ Using existing Firebase app');
         }
 
         auth = window.firebase.auth();
         db = window.firebase.database();
       } catch (e) {
-        log('[Firebase] Firebase initialization failed (offline mode):', e.message);
+        // SILENT MODE: Don't throw, just log and continue
+        console.warn('[Firebase] ⚠️ Firebase initialization failed (local-only mode):', e.message);
         store?.set?.('firebase.initialized', false);
         store?.set?.('firebase.available', false);
         nexus?.emit?.('FIREBASE_UNAVAILABLE', { error: e.message });
@@ -328,17 +336,18 @@ window.OdinModules.push(function FirebaseServiceModuleInit(ctx) {
           // Apply settings ONCE. Re-applying triggers "overriding original host" warnings.
           if (!firestoreSettingsApplied) {
             firestoreSettingsApplied = true;
-            applyFirestoreSettingsOnce(fs, log);
+            applyFirestoreSettingsOnce(fs, console.log);
           }
 
           setupFirestoreMonitoring();
         } else {
           fs = null;
-          log('[Firebase] Firestore SDK not loaded');
+          console.warn('[Firebase] ⚠️ Firestore SDK not loaded (continuing without Firestore)');
         }
       } catch (e) {
         fs = null;
-        log('[Firebase] Firestore init failed (non-fatal):', e && e.message ? e.message : e);
+        // SILENT MODE: Don't throw
+        console.warn('[Firebase] ⚠️ Firestore init failed (non-fatal):', e && e.message ? e.message : e);
       }
 
       // Functions init
@@ -346,9 +355,11 @@ window.OdinModules.push(function FirebaseServiceModuleInit(ctx) {
         if (!window.firebase.app) throw new Error('firebase.app() missing');
         if (typeof window.firebase.app().functions !== 'function') throw new Error('functions() missing');
         fn = window.firebase.app().functions('us-central1');
+        console.log('[Firebase] ✓ Functions initialized');
       } catch (e) {
         fn = null;
-        log('[Firebase] Functions init failed:', e && e.message ? e.message : e);
+        // SILENT MODE: Don't throw
+        console.warn('[Firebase] ⚠️ Functions init failed (authentication unavailable):', e && e.message ? e.message : e);
       }
 
       setupConnectivity();
@@ -356,14 +367,24 @@ window.OdinModules.push(function FirebaseServiceModuleInit(ctx) {
       if (!unsubAuth && auth) {
         try {
           unsubAuth = auth.onAuthStateChanged((user) => { refreshClaims(user); });
+          console.log('[Firebase] ✓ Auth state listener registered');
         } catch (e) {
-          log('[Firebase] Auth listener failed:', e && e.message ? e.message : e);
+          // SILENT MODE: Don't throw
+          console.warn('[Firebase] ⚠️ Auth listener failed (non-fatal):', e && e.message ? e.message : e);
         }
       }
 
+      const queueSize = getQueue().length;
       store?.set?.('firebase.initialized', true);
       store?.set?.('firebase.available', true);
-      store?.set?.('firebase.fsQueueSize', getQueue().length);
+      store?.set?.('firebase.fsQueueSize', queueSize);
+
+      console.log('[Firebase] ✓ Firebase service ready');
+      console.log('[Firebase]   → RTDB available:', !!db);
+      console.log('[Firebase]   → Firestore available:', !!fs);
+      console.log('[Firebase]   → Functions available:', !!fn);
+      console.log('[Firebase]   → Pending queue size:', queueSize);
+
       return true;
     }
 
@@ -622,13 +643,22 @@ window.OdinModules.push(function FirebaseServiceModuleInit(ctx) {
     };
 
     function destroy() {
+      console.log('[Firebase] Destroying Firebase service...');
       teardownConnectivity();
       teardownFirestoreMonitoring();
       if (typeof unsubAuth === 'function') {
         try { unsubAuth(); } catch (_) {}
       }
       unsubAuth = null;
+
+      // CRITICAL: Clear the global init flag to allow clean re-initialization
+      if (window.__ODIN_FS_INIT__ === true) {
+        window.__ODIN_FS_INIT__ = false;
+        console.log('[Firebase] ✓ Cleared global Firestore init flag');
+      }
+
       store?.set?.('firebase.initialized', false);
+      console.log('[Firebase] ✓ Service destroyed');
     }
 
     ctx.firebase = firebaseFacade;

@@ -206,23 +206,37 @@
       return;
     }
 
-    // Initialize core runtime (this will initialize all registered modules)
+    // ========================================
+    // INITIALIZATION SEQUENCE - LOCAL-FIRST ARCHITECTURE
+    // ========================================
+    // The initialization follows a strict order to ensure:
+    // 1. Utils and logging are available first
+    // 2. Data layer (API, Storage) is ready before controllers
+    // 3. Controllers (handlers, AI) are ready before UI
+    // 4. UI starts immediately without waiting for Firebase connection
+    //
+    // CRITICAL: All module init() functions are SYNCHRONOUS and NON-BLOCKING.
+    // Firebase connection happens in the background - the UI does NOT wait for it.
+    // The app is fully functional offline using local storage.
+    // ========================================
+
     console.log('[Odin] ========================================');
     console.log('[Odin] Initializing Odin\'s Spear runtime...');
     console.log('[Odin] This will initialize all registered modules in order');
+    console.log('[Odin] LOCAL-FIRST: UI will render immediately, Firebase syncs in background');
     console.log('[Odin] ========================================');
 
-        // Enforce deterministic module init sequence (prevents lost Nexus events)
+    // Enforce deterministic module init sequence (prevents lost Nexus events)
     const moduleOrder = [
-      'log-manager',      // Critical for debugging
-      'neural-network',   // Logic dependency
-      'odin-api-config',  // Data dependency
-      'firebase-service', // Auth dependency
-      'access-control',   // Role dependency
-      'action-handler',   // Core logic (Handle events before they are emitted)
-      'freki-ai',         // Scoring engine
-      'odin-ui-manager',  // UI (Wait for logic to be ready)
-      'ui-profile-injection' // Injector (Emits events to already-active handlers)
+      'log-manager',      // 1. Utils: Logging system
+      'neural-network',   // 2. Utils: AI core
+      'odin-api-config',  // 3. Data: API client (with offline fallback)
+      'firebase-service', // 4. Data: Firebase (NON-BLOCKING, connects in background)
+      'access-control',   // 5. Controllers: Role management
+      'action-handler',   // 6. Controllers: Local-first action handlers
+      'freki-ai',         // 7. Controllers: AI scoring engine
+      'odin-ui-manager',  // 8. UI: Main UI (renders immediately)
+      'ui-profile-injection' // 9. UI: Profile injection
     ];
 
     if (Array.isArray(window.OdinModules)) {

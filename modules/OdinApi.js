@@ -394,8 +394,29 @@
           logEntry.error = e.message;
           logApiCall(logEntry);
 
-          // VISIBLE LOGGING: Log network/request error
-          error('[API] ❌ TORN API REQUEST FAILED:', endpoint);
+          // RESILIENCE: Try to return cached data if available
+          const cachedFallback = getCached(cacheKey, 3600000); // Accept stale cache up to 1 hour old
+          if (cachedFallback) {
+            console.warn('[API] ⚠️ TORN API REQUEST FAILED - Returning stale cached data:', endpoint);
+            console.warn('[API]   → Error:', e.message);
+            console.warn('[API]   → Using cached data from storage');
+
+            // Emit API call error event with fallback flag
+            nexus.emit?.('API_CALL_ERROR', {
+              service: 'torn',
+              endpoint: endpoint,
+              url: url,
+              method: 'GET',
+              error: e.message,
+              duration: duration,
+              fallbackUsed: true
+            });
+
+            return cachedFallback;
+          }
+
+          // No cached data available - log error and throw
+          error('[API] ❌ TORN API REQUEST FAILED (no cached data):', endpoint);
           error('[API]   → Error:', e.message);
           error('[API]   → Duration:', duration + 'ms');
 
@@ -406,7 +427,8 @@
             url: url,
             method: 'GET',
             error: e.message,
-            duration: duration
+            duration: duration,
+            fallbackUsed: false
           });
 
           throw e;
@@ -504,13 +526,34 @@
             error: e.message
           });
 
+          // RESILIENCE: Try to return cached data if available
+          const cachedFallback = getCached(cacheKey, 3600000); // Accept stale cache up to 1 hour old
+          if (cachedFallback) {
+            console.warn('[API] ⚠️ TORN API V2 REQUEST FAILED - Returning stale cached data:', endpoint);
+            console.warn('[API]   → Using cached data from storage');
+
+            nexus.emit?.('API_CALL_ERROR', {
+              service: 'tornV2',
+              endpoint: endpoint,
+              url: url,
+              method: 'GET',
+              error: e.message,
+              duration: duration,
+              fallbackUsed: true
+            });
+
+            return cachedFallback;
+          }
+
+          // No cached data available
           nexus.emit?.('API_CALL_ERROR', {
             service: 'tornV2',
             endpoint: endpoint,
             url: url,
             method: 'GET',
             error: e.message,
-            duration: duration
+            duration: duration,
+            fallbackUsed: false
           });
 
           throw e;
@@ -689,13 +732,32 @@
             error: e.message
           });
 
+          // RESILIENCE: Try to return cached data if available
+          const cachedFallback = getCached(cacheKey, 3600000); // Accept stale cache up to 1 hour old
+          if (cachedFallback) {
+            console.warn('[API] ⚠️ TORNSTATS REQUEST FAILED - Returning stale cached data:', endpoint);
+
+            nexus.emit?.('API_CALL_ERROR', {
+              service: 'tornStats',
+              endpoint: endpoint,
+              url: url,
+              method: 'GET',
+              error: e.message,
+              duration: duration,
+              fallbackUsed: true
+            });
+
+            return cachedFallback;
+          }
+
           nexus.emit?.('API_CALL_ERROR', {
             service: 'tornStats',
             endpoint: endpoint,
             url: url,
             method: 'GET',
             error: e.message,
-            duration: duration
+            duration: duration,
+            fallbackUsed: false
           });
 
           throw e;
@@ -775,13 +837,32 @@
             error: e.message
           });
 
+          // RESILIENCE: Try to return cached data if available
+          const cachedFallback = getCached(cacheKey, 3600000); // Accept stale cache up to 1 hour old
+          if (cachedFallback) {
+            console.warn('[API] ⚠️ FFSCOUTER REQUEST FAILED - Returning stale cached data:', endpoint);
+
+            nexus.emit?.('API_CALL_ERROR', {
+              service: 'ffScouter',
+              endpoint: endpoint,
+              url: url,
+              method: 'GET',
+              error: e.message,
+              duration: duration,
+              fallbackUsed: true
+            });
+
+            return cachedFallback;
+          }
+
           nexus.emit?.('API_CALL_ERROR', {
             service: 'ffScouter',
             endpoint: endpoint,
             url: url,
             method: 'GET',
             error: e.message,
-            duration: duration
+            duration: duration,
+            fallbackUsed: false
           });
 
           throw e;

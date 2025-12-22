@@ -153,49 +153,69 @@
 
 async function handleAddTarget(payload) {
       const { targetId } = payload || {};
-      if (!targetId) return;
+      if (!targetId) {
+        console.error('[ActionHandler] ADD_TARGET called with no targetId');
+        return;
+      }
 
-      log('[ActionHandler] Adding target:', targetId);
+      console.log('[ActionHandler] ➕ Adding target:', targetId);
 
       try {
         const targets = loadTargets();
 
         if (targets[targetId]) {
-          log('[ActionHandler] Target already exists:', targetId);
+          console.log('[ActionHandler] ⚠️ Target already exists:', targetId);
           nexus.emit('TARGET_ALREADY_EXISTS', { targetId });
           return;
         }
 
-        targets[targetId] = {
+        // CRITICAL: Save to local storage IMMEDIATELY (local-first)
+        const newTarget = {
           id: targetId,
           addedAt: Date.now(),
-          addedBy: ctx?.firebase?.getCurrentUser?.()?.uid || null,
+          addedBy: ctx?.firebase?.getCurrentUser?.()?.uid || 'local',
           targetName: null,
           level: null,
           factionName: null,
           lastUpdated: Date.now()
         };
 
+        targets[targetId] = newTarget;
         saveTargets(targets);
 
-        nexus.emit('TARGET_ADDED', { targetId, target: targets[targetId] });
+        console.log('[ActionHandler] ✓ Target saved locally:', targetId);
+        nexus.emit('TARGET_ADDED', { targetId, target: newTarget });
 
-        // Fetch profile (best-effort)
+        // Background: Fetch profile (non-blocking, best-effort)
         if (ctx.api && typeof ctx.api.getUser === 'function') {
-          try {
-            const profile = await ctx.api.getUser(targetId, 'basic,profile,bars');
-            if (profile) {
-              mergeProfileIntoTarget(targets[targetId], profile);
-              targets[targetId].lastUpdated = Date.now();
-              saveTargets(targets);
-              nexus.emit('TARGET_INFO_UPDATED', { targetId, target: targets[targetId] });
-            }
-          } catch (e) {
-            log('[ActionHandler] Failed to fetch target profile (non-fatal):', e && e.message ? e.message : e);
-          }
+          // Don't await - run in background
+          ctx.api.getUser(targetId, 'basic,profile,bars')
+            .then((profile) => {
+              if (profile) {
+                const currentTargets = loadTargets();
+                if (currentTargets[targetId]) {
+                  mergeProfileIntoTarget(currentTargets[targetId], profile);
+                  currentTargets[targetId].lastUpdated = Date.now();
+                  saveTargets(currentTargets);
+                  console.log('[ActionHandler] ✓ Profile data enriched for target:', targetId);
+                  nexus.emit('TARGET_INFO_UPDATED', { targetId, target: currentTargets[targetId] });
+                }
+              }
+            })
+            .catch((e) => {
+              console.warn('[ActionHandler] ⚠️ Profile fetch failed (non-fatal):', targetId, e.message);
+            });
         }
-} catch (e) {
-        log('[ActionHandler] Error adding target:', e && e.message ? e.message : e);
+
+        // Background: Sync to Firebase (non-blocking, queued if offline)
+        if (ctx.firebase && typeof ctx.firebase.setDoc === 'function') {
+          ctx.firebase.setDoc('targets', String(targetId), newTarget, { merge: true })
+            .catch((e) => {
+              console.warn('[ActionHandler] ⚠️ Firebase sync queued for target:', targetId);
+            });
+        }
+      } catch (e) {
+        console.error('[ActionHandler] ❌ Error adding target:', e.message || e);
         nexus.emit('TARGET_ADD_FAILED', { targetId, error: e && e.message ? e.message : String(e) });
       }
     }
@@ -205,33 +225,38 @@ async function handleAddTarget(payload) {
     // ============================================
     async function handleClaimTarget(payload) {
       const { targetId } = payload || {};
-      if (!targetId) return;
+      if (!targetId) {
+        console.error('[ActionHandler] CLAIM_TARGET called with no targetId');
+        return;
+      }
 
       try {
         const claims = loadClaims();
         const uid = ctx?.firebase?.getCurrentUser?.()?.uid || 'local';
 
-        claims[targetId] = {
+        // CRITICAL: Save to local storage IMMEDIATELY (local-first)
+        const newClaim = {
           targetId,
           claimedBy: uid,
           claimedAt: Date.now(),
           status: 'claimed'
         };
 
+        claims[targetId] = newClaim;
         saveClaims(claims);
 
-        nexus.emit('TARGET_CLAIMED', { targetId, claim: claims[targetId] });
+        console.log('[ActionHandler] ✓ Claim saved locally:', targetId, 'by', uid);
+        nexus.emit('TARGET_CLAIMED', { targetId, claim: newClaim });
 
-        // Best-effort backend sync if available
+        // Background: Sync to Firebase (non-blocking, queued if offline)
         if (ctx.firebase && typeof ctx.firebase.setDoc === 'function') {
-          try {
-            await ctx.firebase.setDoc('claims', String(targetId), claims[targetId], { merge: true });
-          } catch (e) {
-            // Non-fatal: queue handled in FirebaseService
-          }
+          ctx.firebase.setDoc('claims', String(targetId), newClaim, { merge: true })
+            .catch((e) => {
+              console.warn('[ActionHandler] ⚠️ Firebase sync queued for claim:', targetId);
+            });
         }
       } catch (e) {
-        log('[ActionHandler] Claim error:', e && e.message ? e.message : e);
+        console.error('[ActionHandler] ❌ Claim error:', e.message || e);
         nexus.emit('TARGET_CLAIM_FAILED', { targetId, error: e && e.message ? e.message : String(e) });
       }
     }
@@ -241,26 +266,39 @@ async function handleAddTarget(payload) {
     // ============================================
     async function handleUnclaimTarget(payload) {
       const { targetId } = payload || {};
-      if (!targetId) return;
+      if (!targetId) {
+        console.error('[ActionHandler] UNCLAIM_TARGET called with no targetId');
+        return;
+      }
 
       try {
         const claims = loadClaims();
+
+        // CRITICAL: Update local storage IMMEDIATELY (local-first)
         if (claims[targetId]) delete claims[targetId];
         saveClaims(claims);
 
+        console.log('[ActionHandler] ✓ Unclaim saved locally:', targetId);
         nexus.emit('TARGET_UNCLAIMED', { targetId });
 
+        // Background: Sync to Firebase (non-blocking, queued if offline)
         if (ctx.firebase && typeof ctx.firebase.deleteDoc === 'function') {
-          try {
-            await ctx.firebase.deleteDoc('claims', String(targetId));
-          } catch (e) {
-            // queued/non-fatal
-          }
+          ctx.firebase.deleteDoc('claims', String(targetId))
+            .catch((e) => {
+              console.warn('[ActionHandler] ⚠️ Firebase sync queued for unclaim:', targetId);
+            });
         }
       } catch (e) {
-        log('[ActionHandler] Unclaim error:', e && e.message ? e.message : e);
+        console.error('[ActionHandler] ❌ Unclaim error:', e.message || e);
         nexus.emit('TARGET_UNCLAIM_FAILED', { targetId, error: e && e.message ? e.message : String(e) });
       }
+    }
+
+    // ============================================
+    // RELEASE CLAIM HANDLER (alias for unclaim)
+    // ============================================
+    async function handleReleaseClaim(payload) {
+      return handleUnclaimTarget(payload);
     }
 
     
@@ -270,28 +308,36 @@ async function handleAddTarget(payload) {
     // ============================================
     async function handleRemoveTarget(payload) {
       const { targetId } = payload || {};
-      if (!targetId) return;
+      if (!targetId) {
+        console.error('[ActionHandler] REMOVE_TARGET called with no targetId');
+        return;
+      }
 
       try {
+        // CRITICAL: Update local storage IMMEDIATELY (local-first)
         const targets = loadTargets();
         if (targets[targetId]) delete targets[targetId];
         saveTargets(targets);
 
-        // also remove claim if any
+        // Also remove claim if any
         const claims = loadClaims();
         if (claims[targetId]) {
           delete claims[targetId];
           saveClaims(claims);
         }
 
+        console.log('[ActionHandler] ✓ Target removed locally:', targetId);
         nexus.emit('TARGET_REMOVED', { targetId });
 
-        // best-effort backend cleanup
+        // Background: Cleanup in Firebase (non-blocking, queued if offline)
         if (ctx.firebase && typeof ctx.firebase.deleteDoc === 'function') {
-          try { await ctx.firebase.deleteDoc('claims', String(targetId)); } catch (_) {}
+          ctx.firebase.deleteDoc('claims', String(targetId))
+            .catch((e) => {
+              console.warn('[ActionHandler] ⚠️ Firebase cleanup queued for removed target:', targetId);
+            });
         }
       } catch (e) {
-        log('[ActionHandler] Remove target error:', e && e.message ? e.message : e);
+        console.error('[ActionHandler] ❌ Remove target error:', e.message || e);
         nexus.emit('TARGET_REMOVE_FAILED', { targetId, error: e && e.message ? e.message : String(e) });
       }
     }
