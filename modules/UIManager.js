@@ -10,6 +10,7 @@
   window.OdinModules.push(function OdinUIManagerModuleInit(OdinContext) {
     const ctx = OdinContext || {};
     const storage = ctx.storage || { getJSON: () => null, setJSON: () => {} };
+    const store = ctx.store || { get: () => null, set: () => {}, update: () => {} };
     const nexus = ctx.nexus || { emit: () => {}, on: () => () => {} };
     const log = ctx.log || console.log;
     const error = ctx.error || console.error;
