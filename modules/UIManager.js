@@ -1295,7 +1295,25 @@ const onlineMembers = Object.values(presence).filter(p => p.status === 'online')
       const personalTargets = state.personalTargets || {};
       const frekiInfo = ctx.freki?.getModelInfo?.() || {};
 
+      // Get player info cards if available
+      let playerInfoHtml = '';
+      try {
+        if (ctx.playerInfo?.renderPlayerInfoCards) {
+          playerInfoHtml = ctx.playerInfo.renderPlayerInfoCards();
+        }
+      } catch (e) {
+        console.error('[UIManager] Failed to render player info cards:', e);
+      }
+
       return `
+        <div style="margin-bottom: 10px; text-align: right;">
+          <button class="odin-btn odin-btn-secondary odin-btn-small" data-odin-action="refreshPlayerInfo">
+            🔄 Refresh Player Data
+          </button>
+        </div>
+
+        ${playerInfoHtml}
+
         <div class="odin-card">
           <div class="odin-card-header">
             <div class="odin-card-title">⭐ Favorites</div>
@@ -1942,6 +1960,11 @@ const onlineMembers = Object.values(presence).filter(p => p.status === 'online')
       getRecommendations: () => nexus.emit?.('GET_RECOMMENDATIONS'),
       exportData: () => nexus.emit?.('EXPORT_DATA'),
       clearExpired: () => nexus.emit?.('CLEAR_EXPIRED'),
+      refreshPlayerInfo: () => {
+        nexus.emit?.('REFRESH_PLAYER_INFO');
+        showToast('Refreshing player data...', 'info');
+        setTimeout(() => renderTabContent(), 1000);
+      },
 
       // FIXED: Only save keys that were actually changed
       saveApiKeys: () => {

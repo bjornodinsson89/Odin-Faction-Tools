@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Odin Faction Tools
 // @namespace    http://tampermonkey.net/
-// @version      5.1.0
-// @description  Torn City faction management tools with Firebase backend - SECURITY UPDATE: API request debouncing, RTDB roles lockdown, rank-based Firestore rules, event-driven architecture
+// @version      5.2.0
+// @description  Torn City faction management tools with Firebase backend - NEW: Player Info Cards with comprehensive stats tracking, progress monitoring, and automatic updates
 // @author       BjornOdinsson89
 // @match        https://www.torn.com/*
 // @icon         https://i.postimg.cc/BQ6bSYKM/file-000000004bb071f5a96fc52564bf26ad-(1).png
@@ -33,6 +33,7 @@
 // @require      https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/main/modules/FirebaseService.js
 // @require      https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/main/modules/AccessControl.js
 // @require      https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/main/modules/OdinApi.js
+// @require      https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/main/modules/PlayerInfo.js
 // @require      https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/main/modules/NeuralNetwork.js
 // @require      https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/main/modules/freki.js
 // @require      https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/main/modules/ActionHandler.js
@@ -62,7 +63,7 @@
      ODIN FACTION TOOLS - MAIN ENTRY POINT
      ============================================================ */
 
-  console.log('[Odin] Initializing Odin Faction Tools v5.1.0 (Security & Architecture Refactor)');
+  console.log('[Odin] Initializing Odin Faction Tools v5.2.0 (Player Info Cards & Enhanced Error Handling)');
 
   // Verify Firebase is loaded
   if (typeof window.firebase === 'undefined') {
