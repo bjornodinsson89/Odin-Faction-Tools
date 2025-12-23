@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Odin Faction Tools
 // @namespace    http://tampermonkey.net/
-// @version      5.2.0
+// @version      1.0.0
 // @description  Torn City faction management tools with Firebase backend - NEW: Player Info Cards with comprehensive stats tracking, progress monitoring, and automatic updates
 // @author       BjornOdinsson89
 // @match        https://www.torn.com/*
