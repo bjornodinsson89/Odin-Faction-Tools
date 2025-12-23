@@ -1,8 +1,9 @@
 // ==OdinModule==
 // @name        Odin-ui.js
 // @id          odin-ui-styles
-// @version     4.0.10
+// @version     4.0.0
 // ==/OdinModule==
+
 (function () {
   'use strict';
 
