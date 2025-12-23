@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Odin Faction Tools
 // @namespace    http://tampermonkey.net/
-// @version      1.0.0
+// @version      5.2.0
 // @description  Torn City faction management tools with Firebase backend - NEW: Player Info Cards with comprehensive stats tracking, progress monitoring, and automatic updates
 // @author       BjornOdinsson89
 // @match        https://www.torn.com/*
@@ -22,6 +22,8 @@
 // @connect      googleapis.com
 // @connect      gstatic.com
 // @connect      googleusercontent.com
+// @connect      raw.githubusercontent.com
+// @connect      torn-war-room-default-rtdb.firebaseio.com
 // @run-at       document-start
 // @require      https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js
 // @require      https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js
@@ -123,28 +125,7 @@
           .catch(reject);
       }
     });
-  };
-
-  /* ============================================================
-     MODULE LOADER
-     ============================================================ */
-  // NOTE: Modules are loaded via @require directives (lines 24-33) which execute
-  // BEFORE this main script runs. The @require mechanism ensures proper load order
-  // and caching. We do NOT need to dynamically load modules again here.
-  //
-  // Expected module load order from @require:
-  //   1. odins-spear-core.js      - Core runtime
-  //   2. LogManager.js             - Logging system
-  //   3. FirebaseService.js        - Firebase + Firestore
-  //   4. AccessControl.js          - Role management
-  //   5. OdinApi.js                - API client
-  //   6. NeuralNetwork.js          - Neural network for Freki
-  //   7. freki.js                  - AI scoring
-  //   8. ActionHandler.js          - Action handlers (targets, claims)
-  //   9. UIManager.js              - UI
-  //   10. ui-profile-injection.js  - Profile injection
-  //
-  // Each module registers itself by calling: window.OdinModules.push(moduleInitFn)
+  }; 
 
   function verifyModulesLoaded() {
     const moduleCount = Array.isArray(window.OdinModules) ? window.OdinModules.length : 0;
