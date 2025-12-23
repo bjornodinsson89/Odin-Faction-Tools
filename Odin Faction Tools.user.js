@@ -125,7 +125,7 @@
           .catch(reject);
       }
     });
-  }; 
+  };
 
   function verifyModulesLoaded() {
     const moduleCount = Array.isArray(window.OdinModules) ? window.OdinModules.length : 0;
@@ -136,9 +136,9 @@
       return false;
     }
 
-    // Expected modules: 10
-    if (moduleCount < 10) {
-      console.warn('[Odin] WARNING: Expected 10 modules, found', moduleCount);
+    // Expected modules: 8
+    if (moduleCount < 8) {
+      console.warn('[Odin] WARNING: Expected 8 modules, found', moduleCount);
       console.warn('[Odin] Some modules may have failed to load. Check browser console for errors.');
     }
 
