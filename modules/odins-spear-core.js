@@ -5,6 +5,1717 @@
    - Local storage abstraction (Tampermonkey GM_* with localStorage fallback)
    - Module loader for window.OdinModules
    ============================================================ */
+
+(function() {
+  'use strict';
+
+  if (!window.OdinModules) if (!window.OdinModules) window.OdinModules = [];
+
+  window.OdinModules.push(function LogManagerModuleInit(OdinContext) {
+    const ctx = OdinContext || {};
+    const nexus = ctx.nexus || { emit: () => {}, on: () => () => {} };
+    const log = ctx.log || console.log;
+
+    const LOG_VERSION = '1.0.0';
+    const MAX_LOGS = 1000; // Maximum number of logs to keep in memory
+
+    // ============================================
+    // LOG STORAGE
+    // ============================================
+    const logs = {
+      errors: [],
+      apiCalls: [],
+      databaseCalls: [],
+      networkCalls: [],
+      events: [],
+      all: []
+    };
+
+    // ============================================
+    // LOG ENTRY CREATION
+    // ============================================
+    function createLogEntry(type, data) {
+      const entry = {
+        id: Date.now() + '-' + Math.random().toString(36).substr(2, 9),
+        timestamp: Date.now(),
+        type: type,
+        ...data
+      };
+
+      // Add to specific category
+      if (logs[type]) {
+        logs[type].unshift(entry);
+        if (logs[type].length > MAX_LOGS) {
+          logs[type].length = MAX_LOGS;
+        }
+      }
+
+      // Add to all logs
+      logs.all.unshift(entry);
+      if (logs.all.length > MAX_LOGS) {
+        logs.all.length = MAX_LOGS;
+      }
+
+      // Emit log event
+      nexus.emit('LOG_ENTRY_ADDED', { entry, type });
+
+      return entry;
+    }
+
+    // ============================================
+    // ERROR LOGGING
+    // ============================================
+    function logError(error, context = {}) {
+      const errorData = {
+        message: error.message || String(error),
+        stack: error.stack || null,
+        context: context,
+        level: context.level || 'error'
+      };
+
+      return createLogEntry('errors', errorData);
+    }
+
+    // ============================================
+    // API CALL LOGGING
+    // ============================================
+    function logApiCall(data) {
+      const apiData = {
+        service: data.service || 'unknown',
+        endpoint: data.endpoint || '',
+        url: data.url || '',
+        method: data.method || 'GET',
+        status: data.status || 'pending',
+        statusCode: data.statusCode || null,
+        duration: data.duration || 0,
+        cached: data.cached || false,
+        error: data.error || null,
+        requestData: data.requestData || null,
+        responseData: data.responseData || null
+      };
+
+      return createLogEntry('apiCalls', apiData);
+    }
+
+    // ============================================
+    // DATABASE CALL LOGGING
+    // ============================================
+    function logDatabaseCall(data) {
+      const dbData = {
+        operation: data.operation || 'unknown', // read, write, update, delete
+        path: data.path || '',
+        direction: data.direction || 'out', // in or out
+        status: data.status || 'pending',
+        duration: data.duration || 0,
+        error: data.error || null,
+        dataSize: data.dataSize || 0,
+        cached: data.cached || false
+      };
+
+      return createLogEntry('databaseCalls', dbData);
+    }
+
+    // ============================================
+    // NETWORK CALL LOGGING
+    // ============================================
+    function logNetworkCall(data) {
+      const networkData = {
+        url: data.url || '',
+        method: data.method || 'GET',
+        direction: data.direction || 'out', // in or out
+        status: data.status || 'pending',
+        statusCode: data.statusCode || null,
+        duration: data.duration || 0,
+        size: data.size || 0,
+        error: data.error || null
+      };
+
+      return createLogEntry('networkCalls', networkData);
+    }
+
+    // ============================================
+    // EVENT LOGGING
+    // ============================================
+    function logEvent(eventName, data = {}) {
+      const eventData = {
+        eventName: eventName,
+        data: data
+      };
+
+      return createLogEntry('events', eventData);
+    }
+
+    // ============================================
+    // LOG RETRIEVAL
+    // ============================================
+    function getLogs(filter = {}) {
+      const {
+        type = 'all',
+        limit = 100,
+        startTime = null,
+        endTime = null,
+        search = null
+      } = filter;
+
+      let results = logs[type] || logs.all;
+
+      // Filter by time range
+      if (startTime || endTime) {
+        results = results.filter(entry => {
+          if (startTime && entry.timestamp < startTime) return false;
+          if (endTime && entry.timestamp > endTime) return false;
+          return true;
+        });
+      }
+
+      // Filter by search term
+      if (search) {
+        const searchLower = search.toLowerCase();
+        results = results.filter(entry => {
+          const entryStr = JSON.stringify(entry).toLowerCase();
+          return entryStr.includes(searchLower);
+        });
+      }
+
+      // Apply limit
+      return results.slice(0, limit);
+    }
+
+    // ============================================
+    // LOG FORMATTING
+    // ============================================
+    function formatLogEntry(entry) {
+      const timestamp = new Date(entry.timestamp).toISOString();
+      const type = entry.type.toUpperCase();
+
+      switch (entry.type) {
+        case 'errors':
+          return `[${timestamp}] [${type}] ${entry.message}${entry.stack ? '\n' + entry.stack : ''}`;
+
+        case 'apiCalls':
+          return `[${timestamp}] [${type}] ${entry.service} ${entry.method} ${entry.endpoint} - ${entry.status} (${entry.duration}ms)${entry.error ? ' ERROR: ' + entry.error : ''}`;
+
+        case 'databaseCalls':
+          return `[${timestamp}] [${type}] ${entry.operation} ${entry.path} [${entry.direction}] - ${entry.status} (${entry.duration}ms)${entry.error ? ' ERROR: ' + entry.error : ''}`;
+
+        case 'networkCalls':
+          return `[${timestamp}] [${type}] ${entry.method} ${entry.url} [${entry.direction}] - ${entry.status} (${entry.duration}ms)${entry.error ? ' ERROR: ' + entry.error : ''}`;
+
+        case 'events':
+          return `[${timestamp}] [${type}] ${entry.eventName} ${JSON.stringify(entry.data)}`;
+
+        default:
+          return `[${timestamp}] [${type}] ${JSON.stringify(entry)}`;
+      }
+    }
+
+    // ============================================
+    // LOG EXPORT
+    // ============================================
+    function exportLogs(filter = {}) {
+      const logsToExport = getLogs(filter);
+      return logsToExport.map(formatLogEntry).join('\n');
+    }
+
+    // ============================================
+    // LOG REDACTION (for sensitive data)
+    // ============================================
+    function redactSensitiveData(data) {
+      if (typeof data !== 'object' || data === null) {
+        return data;
+      }
+
+      const redacted = Array.isArray(data) ? [...data] : { ...data };
+      const sensitiveKeys = ['key', 'apiKey', 'apikey', 'api_key', 'password', 'token', 'secret', 'auth', 'authorization'];
+
+      for (const key in redacted) {
+        const keyLower = key.toLowerCase();
+
+        // Redact sensitive keys
+        if (sensitiveKeys.some(sk => keyLower.includes(sk))) {
+          if (typeof redacted[key] === 'string' && redacted[key].length > 8) {
+            redacted[key] = redacted[key].slice(0, 4) + '••••••••' + redacted[key].slice(-4);
+          } else {
+            redacted[key] = '••••••••';
+          }
+        }
+
+        // Recursively redact nested objects
+        else if (typeof redacted[key] === 'object' && redacted[key] !== null) {
+          redacted[key] = redactSensitiveData(redacted[key]);
+        }
+      }
+
+      return redacted;
+    }
+
+    function exportLogsRedacted(filter = {}) {
+      const logsToExport = getLogs(filter);
+      const redactedLogs = logsToExport.map(entry => {
+        const redacted = redactSensitiveData(entry);
+        return formatLogEntry(redacted);
+      });
+      return redactedLogs.join('\n');
+    }
+
+    // ============================================
+    // EMAIL LOGS
+    // ============================================
+    async function emailLogs(emailAddress, filter = {}) {
+      try {
+        const logsText = exportLogsRedacted(filter);
+        const subject = encodeURIComponent('Odin Faction Tools - Log Report');
+        const body = encodeURIComponent(
+          'Odin Faction Tools Log Report\n' +
+          'Generated: ' + new Date().toISOString() + '\n' +
+          'Version: ' + LOG_VERSION + '\n' +
+          '================================\n\n' +
+          logsText
+        );
+
+        // Create mailto link
+        const mailtoLink = `mailto:${emailAddress}?subject=${subject}&body=${body}`;
+
+        // Open mailto link
+        window.location.href = mailtoLink;
+
+        return { success: true, message: 'Email client opened' };
+      } catch (error) {
+        return { success: false, message: error.message };
+      }
+    }
+
+    // ============================================
+    // CLEAR LOGS
+    // ============================================
+    function clearLogs(type = 'all') {
+      if (type === 'all') {
+        for (const key in logs) {
+          logs[key] = [];
+        }
+      } else if (logs[type]) {
+        logs[type] = [];
+      }
+
+      nexus.emit('LOGS_CLEARED', { type });
+      log('[LogManager] Logs cleared:', type);
+    }
+
+    // ============================================
+    // STATS
+    // ============================================
+    function getLogStats() {
+      return {
+        total: logs.all.length,
+        errors: logs.errors.length,
+        apiCalls: logs.apiCalls.length,
+        databaseCalls: logs.databaseCalls.length,
+        networkCalls: logs.networkCalls.length,
+        events: logs.events.length,
+        oldestTimestamp: logs.all[logs.all.length - 1]?.timestamp || null,
+        newestTimestamp: logs.all[0]?.timestamp || null
+      };
+    }
+
+    // ============================================
+    // INTERCEPT CONSOLE ERRORS
+    // ============================================
+    function interceptConsoleErrors() {
+      const originalError = console.error;
+      console.error = function(...args) {
+        // Log to our system
+        logError(new Error(args.join(' ')), { source: 'console.error' });
+        // Call original
+        originalError.apply(console, args);
+      };
+
+      const originalWarn = console.warn;
+      console.warn = function(...args) {
+        // Log warnings as errors with lower level
+        logError(new Error(args.join(' ')), { source: 'console.warn', level: 'warning' });
+        // Call original
+        originalWarn.apply(console, args);
+      };
+
+      // Intercept window errors
+      window.addEventListener('error', (event) => {
+        logError(event.error || new Error(event.message), {
+          source: 'window.error',
+          filename: event.filename,
+          lineno: event.lineno,
+          colno: event.colno
+        });
+      });
+
+      // Intercept unhandled promise rejections
+      window.addEventListener('unhandledrejection', (event) => {
+        logError(new Error('Unhandled Promise Rejection: ' + event.reason), {
+          source: 'unhandledrejection'
+        });
+      });
+    }
+
+    // ============================================
+    // HOOK INTO API CALLS
+    // ============================================
+    function hookApiCalls() {
+      // Listen to API call events from OdinApi module
+      nexus.on('API_CALL_START', (data) => {
+        logApiCall({
+          ...data,
+          status: 'pending'
+        });
+      });
+
+      nexus.on('API_CALL_SUCCESS', (data) => {
+        logApiCall({
+          ...data,
+          status: 'success'
+        });
+      });
+
+      nexus.on('API_CALL_ERROR', (data) => {
+        logApiCall({
+          ...data,
+          status: 'error'
+        });
+      });
+    }
+
+    // ============================================
+    // HOOK INTO DATABASE CALLS
+    // ============================================
+    function hookDatabaseCalls() {
+      nexus.on('DB_CALL_START', (data) => {
+        logDatabaseCall({
+          ...data,
+          status: 'pending'
+        });
+      });
+
+      nexus.on('DB_CALL_SUCCESS', (data) => {
+        logDatabaseCall({
+          ...data,
+          status: 'success'
+        });
+      });
+
+      nexus.on('DB_CALL_ERROR', (data) => {
+        logDatabaseCall({
+          ...data,
+          status: 'error'
+        });
+      });
+    }
+
+    // ============================================
+    // PUBLIC API
+    // ============================================
+    const LogManagerAPI = {
+      version: LOG_VERSION,
+      logError,
+      logApiCall,
+      logDatabaseCall,
+      logNetworkCall,
+      logEvent,
+      getLogs,
+      exportLogs,
+      exportLogsRedacted,
+      emailLogs,
+      clearLogs,
+      getLogStats,
+      formatLogEntry
+    };
+
+    // ============================================
+    // MODULE LIFECYCLE
+    // ============================================
+    function init() {
+      log('[LogManager] Initializing v' + LOG_VERSION);
+
+      // Intercept console errors
+      interceptConsoleErrors();
+
+      // Hook into API and DB calls
+      hookApiCalls();
+      hookDatabaseCalls();
+
+      // Expose globally
+      window.OdinLogManager = LogManagerAPI;
+      ctx.logManager = LogManagerAPI;
+
+      log('[LogManager] Ready - Tracking all logs');
+      nexus.emit('LOG_MANAGER_READY', { version: LOG_VERSION });
+    }
+
+    function destroy() {
+      log('[LogManager] Destroying...');
+      clearLogs('all');
+      window.OdinLogManager = null;
+      log('[LogManager] Destroyed');
+    }
+
+    return {
+      id: 'log-manager',
+      init,
+      destroy
+    };
+  });
+})();
+
+
+
+/* =========================
+   Embedded: PlayerInfo.js
+   ========================= */
+
+/**
+ * Odin Tools - Player Information Module
+ * Displays comprehensive player stats with progress tracking
+ * Version: 1.0.0
+ * Author: BjornOdinsson89
+ */
+
+(function() {
+  'use strict';
+
+  if (!window.OdinModules) window.OdinModules = [];
+
+  window.OdinModules.push(function PlayerInfoModuleInit(OdinContext) {
+    const ctx = OdinContext || {};
+    const storage = ctx.storage || { getJSON: () => null, setJSON: () => {}, get: () => null, set: () => {} };
+    const store = ctx.store || { get: () => null, set: () => {}, update: () => {} };
+    const nexus = ctx.nexus || { emit: () => {}, on: () => () => {} };
+    const log = ctx.log || console.log;
+    const error = ctx.error || console.error;
+
+    // ============================================
+    // CONFIGURATION
+    // ============================================
+    const CONFIG = {
+      updateInterval: 300000, // Update every 5 minutes
+      historyRetention: 31, // Keep 31 days of history
+      storageKey: 'odin_player_history'
+    };
+
+    // ============================================
+    // STATE
+    // ============================================
+    let updateTimer = null;
+    let currentPlayerData = null;
+
+    // ============================================
+    // DATA MANAGEMENT
+    // ============================================
+
+    /**
+     * Get stored player history
+     */
+    function getPlayerHistory() {
+      try {
+        const history = storage.getJSON(CONFIG.storageKey) || {};
+        return {
+          snapshots: history.snapshots || [],
+          lastUpdate: history.lastUpdate || null
+        };
+      } catch (e) {
+        error('[PlayerInfo] Failed to get history:', e);
+        return { snapshots: [], lastUpdate: null };
+      }
+    }
+
+    /**
+     * Save player snapshot to history
+     */
+    function savePlayerSnapshot(data) {
+      try {
+        const history = getPlayerHistory();
+        const now = Date.now();
+
+        const snapshot = {
+          timestamp: now,
+          money: data.money || {},
+          stats: data.battlestats || {},
+          crimes: data.criminalrecord || {},
+          personalStats: data.personalstats || {},
+          networth: data.networth || {}
+        };
+
+        // Add to snapshots
+        history.snapshots.push(snapshot);
+
+        // Keep only recent history
+        const cutoff = now - (CONFIG.historyRetention * 24 * 60 * 60 * 1000);
+        history.snapshots = history.snapshots.filter(s => s.timestamp > cutoff);
+
+        // Sort by timestamp
+        history.snapshots.sort((a, b) => a.timestamp - b.timestamp);
+
+        history.lastUpdate = now;
+
+        storage.setJSON(CONFIG.storageKey, history);
+        log('[PlayerInfo] Snapshot saved, total snapshots:', history.snapshots.length);
+
+        return true;
+      } catch (e) {
+        error('[PlayerInfo] Failed to save snapshot:', e);
+        return false;
+      }
+    }
+
+    /**
+     * Calculate changes over a time period
+     */
+    function calculateChanges(field, subfield, days) {
+      try {
+        const history = getPlayerHistory();
+        if (!history.snapshots || history.snapshots.length === 0) return null;
+
+        const now = Date.now();
+        const targetTime = now - (days * 24 * 60 * 60 * 1000);
+
+        // Find snapshot closest to target time
+        let oldSnapshot = null;
+        for (let i = history.snapshots.length - 1; i >= 0; i--) {
+          if (history.snapshots[i].timestamp <= targetTime) {
+            oldSnapshot = history.snapshots[i];
+            break;
+          }
+        }
+
+        if (!oldSnapshot) {
+          // Use oldest snapshot if we don't have data going back that far
+          oldSnapshot = history.snapshots[0];
+        }
+
+        const currentSnapshot = history.snapshots[history.snapshots.length - 1];
+
+        const oldValue = oldSnapshot[field]?.[subfield] || 0;
+        const newValue = currentSnapshot[field]?.[subfield] || 0;
+
+        return {
+          change: newValue - oldValue,
+          oldValue,
+          newValue,
+          days: (currentSnapshot.timestamp - oldSnapshot.timestamp) / (24 * 60 * 60 * 1000)
+        };
+      } catch (e) {
+        error('[PlayerInfo] Failed to calculate changes:', e);
+        return null;
+      }
+    }
+
+    /**
+     * Calculate average daily gain
+     */
+    function calculateAvgDaily(field, subfield, days = 7) {
+      try {
+        const changes = calculateChanges(field, subfield, days);
+        if (!changes || changes.days === 0) return 0;
+        return changes.change / changes.days;
+      } catch (e) {
+        error('[PlayerInfo] Failed to calculate avg daily:', e);
+        return 0;
+      }
+    }
+
+    // ============================================
+    // API DATA FETCHING
+    // ============================================
+
+    /**
+     * Fetch comprehensive player data
+     */
+    async function fetchPlayerData() {
+      try {
+        if (!ctx.api?.getUser) {
+          error('[PlayerInfo] API not available');
+          return null;
+        }
+
+        log('[PlayerInfo] Fetching player data...');
+
+        const selections = 'profile,money,personalstats,battlestats,crimes,networth';
+        const data = await ctx.api.getUser(null, selections);
+
+        if (!data || data.error) {
+          error('[PlayerInfo] API error:', data?.error?.error || 'Unknown error');
+          return null;
+        }
+
+        currentPlayerData = data;
+
+        // Save snapshot
+        savePlayerSnapshot(data);
+
+        // Update store for UI
+        try {
+          store.set('playerInfo.current', data);
+          store.set('playerInfo.lastUpdate', Date.now());
+        } catch (e) {
+          error('[PlayerInfo] Store update failed:', e);
+        }
+
+        // Emit update event
+        try {
+          nexus.emit?.('PLAYER_INFO_UPDATED', { data });
+        } catch (e) {
+          error('[PlayerInfo] Event emit failed:', e);
+        }
+
+        log('[PlayerInfo] Player data updated');
+        return data;
+
+      } catch (e) {
+        error('[PlayerInfo] Failed to fetch player data:', e);
+        return null;
+      }
+    }
+
+    /**
+     * Start automatic updates
+     */
+    function startAutoUpdate() {
+      try {
+        if (updateTimer) {
+          clearInterval(updateTimer);
+        }
+
+        // Fetch immediately
+        fetchPlayerData();
+
+        // Then set up interval
+        updateTimer = setInterval(() => {
+          fetchPlayerData();
+        }, CONFIG.updateInterval);
+
+        log('[PlayerInfo] Auto-update started (interval:', CONFIG.updateInterval / 1000, 'seconds)');
+      } catch (e) {
+        error('[PlayerInfo] Failed to start auto-update:', e);
+      }
+    }
+
+    /**
+     * Stop automatic updates
+     */
+    function stopAutoUpdate() {
+      try {
+        if (updateTimer) {
+          clearInterval(updateTimer);
+          updateTimer = null;
+          log('[PlayerInfo] Auto-update stopped');
+        }
+      } catch (e) {
+        error('[PlayerInfo] Failed to stop auto-update:', e);
+      }
+    }
+
+    // ============================================
+    // FORMATTING HELPERS
+    // ============================================
+
+    function formatNumber(num) {
+      if (num == null || isNaN(num)) return '0';
+      return Math.floor(num).toLocaleString();
+    }
+
+    function formatMoney(num) {
+      if (num == null || isNaN(num)) return '$0';
+      return '$' + Math.floor(num).toLocaleString();
+    }
+
+    function formatChange(num, isPositiveGood = true) {
+      if (num == null || isNaN(num) || num === 0) return '<span style="color: #9ca3af;">+0</span>';
+
+      const formatted = formatNumber(Math.abs(num));
+      const sign = num > 0 ? '+' : '-';
+      const color = num > 0
+        ? (isPositiveGood ? '#10b981' : '#ef4444')
+        : (isPositiveGood ? '#ef4444' : '#10b981');
+
+      return `<span style="color: ${color}; font-weight: 600;">${sign}${formatted}</span>`;
+    }
+
+    function formatPercentChange(change, total) {
+      if (!change || !total || total === 0) return '';
+      const percent = (change / total) * 100;
+      return ` (${percent > 0 ? '+' : ''}${percent.toFixed(1)}%)`;
+    }
+
+    // ============================================
+    // CARD RENDERING
+    // ============================================
+
+    /**
+     * Render Money Info Card
+     */
+    function renderMoneyCard(data) {
+      try {
+        if (!data || !data.money) {
+          return `
+            <div class="odin-card">
+              <div class="odin-card-header">
+                <div class="odin-card-title">💰 Money Info</div>
+              </div>
+              <div style="padding: 10px; color: #9ca3af;">No data available. API key may not be set.</div>
+            </div>
+          `;
+        }
+
+        const money = data.money || {};
+        const networth = data.networth || {};
+
+        // Calculate changes
+        const cashChange1d = calculateChanges('money', 'money_onhand', 1);
+        const cashChange7d = calculateChanges('money', 'money_onhand', 7);
+        const cashChange30d = calculateChanges('money', 'money_onhand', 30);
+
+        const bankChange1d = calculateChanges('money', 'vault', 1);
+        const bankChange7d = calculateChanges('money', 'vault', 7);
+        const bankChange30d = calculateChanges('money', 'vault', 30);
+
+        const networthChange1d = calculateChanges('networth', 'total', 1);
+        const networthChange7d = calculateChanges('networth', 'total', 7);
+        const networthChange30d = calculateChanges('networth', 'total', 30);
+
+        const avgDailyIncome = calculateAvgDaily('networth', 'total', 7);
+
+        return `
+          <div class="odin-card">
+            <div class="odin-card-header">
+              <div class="odin-card-title">💰 Money Info</div>
+              <span class="odin-badge success">Live</span>
+            </div>
+            <div class="odin-stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
+              <div class="odin-stat-item">
+                <div class="odin-stat-label">Cash on Hand</div>
+                <div class="odin-stat-value" style="font-size: 16px;">${formatMoney(money.money_onhand)}</div>
+                <div style="font-size: 11px; margin-top: 4px;">
+                  Daily: ${cashChange1d ? formatChange(cashChange1d.change) : '-'}<br>
+                  Weekly: ${cashChange7d ? formatChange(cashChange7d.change) : '-'}<br>
+                  Monthly: ${cashChange30d ? formatChange(cashChange30d.change) : '-'}
+                </div>
+              </div>
+
+              <div class="odin-stat-item">
+                <div class="odin-stat-label">Bank Balance</div>
+                <div class="odin-stat-value" style="font-size: 16px;">${formatMoney(money.vault)}</div>
+                <div style="font-size: 11px; margin-top: 4px;">
+                  Daily: ${bankChange1d ? formatChange(bankChange1d.change) : '-'}<br>
+                  Weekly: ${bankChange7d ? formatChange(bankChange7d.change) : '-'}<br>
+                  Monthly: ${bankChange30d ? formatChange(bankChange30d.change) : '-'}
+                </div>
+              </div>
+
+              <div class="odin-stat-item">
+                <div class="odin-stat-label">Stocks Value</div>
+                <div class="odin-stat-value" style="font-size: 16px;">${formatMoney(networth.stockmarket || 0)}</div>
+              </div>
+
+              <div class="odin-stat-item">
+                <div class="odin-stat-label">Total Networth</div>
+                <div class="odin-stat-value" style="font-size: 16px;">${formatMoney(networth.total || 0)}</div>
+                <div style="font-size: 11px; margin-top: 4px;">
+                  Daily: ${networthChange1d ? formatChange(networthChange1d.change) : '-'}<br>
+                  Weekly: ${networthChange7d ? formatChange(networthChange7d.change) : '-'}<br>
+                  Monthly: ${networthChange30d ? formatChange(networthChange30d.change) : '-'}
+                </div>
+              </div>
+
+              <div class="odin-stat-item">
+                <div class="odin-stat-label">Avg Daily Income</div>
+                <div class="odin-stat-value" style="font-size: 16px; color: #10b981;">${formatMoney(avgDailyIncome)}</div>
+                <div style="font-size: 11px; color: #9ca3af; margin-top: 4px;">Based on 7-day trend</div>
+              </div>
+            </div>
+          </div>
+        `;
+      } catch (e) {
+        error('[PlayerInfo] Failed to render money card:', e);
+        return `<div class="odin-card"><div class="odin-card-header"><div class="odin-card-title">💰 Money Info</div></div><div style="padding: 10px; color: #ef4444;">Error rendering card</div></div>`;
+      }
+    }
+
+    /**
+     * Render Stats Info Card
+     */
+    function renderStatsCard(data) {
+      try {
+        if (!data || !data.battlestats) {
+          return `
+            <div class="odin-card">
+              <div class="odin-card-header">
+                <div class="odin-card-title">📊 Battle Stats</div>
+              </div>
+              <div style="padding: 10px; color: #9ca3af;">No data available. API key may not be set.</div>
+            </div>
+          `;
+        }
+
+        const stats = data.battlestats || {};
+        const statNames = ['strength', 'speed', 'dexterity', 'defense'];
+        const statIcons = { strength: '💪', speed: '⚡', dexterity: '🎯', defense: '🛡️' };
+
+        let statsHtml = '';
+
+        for (const stat of statNames) {
+          const value = stats[stat] || 0;
+          const change1d = calculateChanges('stats', stat, 1);
+          const change7d = calculateChanges('stats', stat, 7);
+          const change30d = calculateChanges('stats', stat, 30);
+          const avgDaily = calculateAvgDaily('stats', stat, 7);
+
+          statsHtml += `
+            <div class="odin-stat-item">
+              <div class="odin-stat-label">${statIcons[stat]} ${stat.charAt(0).toUpperCase() + stat.slice(1)}</div>
+              <div class="odin-stat-value" style="font-size: 16px;">${formatNumber(value)}</div>
+              <div style="font-size: 11px; margin-top: 4px;">
+                Daily: ${change1d ? formatChange(change1d.change) : '-'}<br>
+                Weekly: ${change7d ? formatChange(change7d.change) : '-'}<br>
+                Monthly: ${change30d ? formatChange(change30d.change) : '-'}<br>
+                <span style="color: #3b82f6;">Avg/day: ${formatNumber(avgDaily)}</span>
+              </div>
+            </div>
+          `;
+        }
+
+        const total = stats.strength + stats.speed + stats.dexterity + stats.defense;
+        const totalChange7d = calculateChanges('stats', 'strength', 7);
+        const totalAvgDaily =
+          calculateAvgDaily('stats', 'strength', 7) +
+          calculateAvgDaily('stats', 'speed', 7) +
+          calculateAvgDaily('stats', 'dexterity', 7) +
+          calculateAvgDaily('stats', 'defense', 7);
+
+        return `
+          <div class="odin-card">
+            <div class="odin-card-header">
+              <div class="odin-card-title">📊 Battle Stats</div>
+              <span class="odin-badge info">${formatNumber(total)} Total</span>
+            </div>
+            <div style="padding: 10px; font-size: 12px; color: #3b82f6; background: rgba(59, 130, 246, 0.1); margin-bottom: 10px; border-radius: 4px;">
+              <strong>Combined Avg Daily Gain:</strong> ${formatNumber(totalAvgDaily)} stats/day
+            </div>
+            <div class="odin-stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
+              ${statsHtml}
+            </div>
+          </div>
+        `;
+      } catch (e) {
+        error('[PlayerInfo] Failed to render stats card:', e);
+        return `<div class="odin-card"><div class="odin-card-header"><div class="odin-card-title">📊 Battle Stats</div></div><div style="padding: 10px; color: #ef4444;">Error rendering card</div></div>`;
+      }
+    }
+
+    /**
+     * Render Crime Skills Card
+     */
+    function renderCrimeSkillsCard(data) {
+      try {
+        if (!data || !data.criminalrecord) {
+          return `
+            <div class="odin-card">
+              <div class="odin-card-header">
+                <div class="odin-card-title">🎭 Crime Skills</div>
+              </div>
+              <div style="padding: 10px; color: #9ca3af;">No data available. API key may not be set.</div>
+            </div>
+          `;
+        }
+
+        const crimes = data.criminalrecord || {};
+
+        // Main crime stats
+        const crimeStats = [
+          { key: 'selling_illegal_products', label: 'Selling Illegal Products', icon: '💊' },
+          { key: 'theft', label: 'Theft', icon: '🔓' },
+          { key: 'auto_theft', label: 'Auto Theft', icon: '🚗' },
+          { key: 'drug_deals', label: 'Drug Deals', icon: '💉' },
+          { key: 'computer_crimes', label: 'Computer Crimes', icon: '💻' },
+          { key: 'murder', label: 'Murder', icon: '🔪' },
+          { key: 'fraud_crimes', label: 'Fraud', icon: '💳' },
+          { key: 'other', label: 'Other Crimes', icon: '🎯' }
+        ];
+
+        let crimeStatsHtml = '';
+
+        for (const crime of crimeStats) {
+          const value = crimes[crime.key] || 0;
+          const change1d = calculateChanges('crimes', crime.key, 1);
+          const change7d = calculateChanges('crimes', crime.key, 7);
+          const change30d = calculateChanges('crimes', crime.key, 30);
+          const avgDaily = calculateAvgDaily('crimes', crime.key, 7);
+
+          crimeStatsHtml += `
+            <div class="odin-stat-item">
+              <div class="odin-stat-label">${crime.icon} ${crime.label}</div>
+              <div class="odin-stat-value" style="font-size: 14px;">${formatNumber(value)}</div>
+              <div style="font-size: 10px; margin-top: 4px;">
+                Day: ${change1d ? formatChange(change1d.change) : '-'} |
+                Week: ${change7d ? formatChange(change7d.change) : '-'}<br>
+                Month: ${change30d ? formatChange(change30d.change) : '-'} |
+                <span style="color: #3b82f6;">Avg: ${formatNumber(avgDaily)}/d</span>
+              </div>
+            </div>
+          `;
+        }
+
+        const totalCrimes = crimes.total || 0;
+        const totalChange7d = calculateChanges('crimes', 'total', 7);
+
+        return `
+          <div class="odin-card">
+            <div class="odin-card-header">
+              <div class="odin-card-title">🎭 Crime Skills</div>
+              <span class="odin-badge warning">${formatNumber(totalCrimes)} Total</span>
+            </div>
+            <div style="padding: 10px; font-size: 12px; background: rgba(251, 191, 36, 0.1); margin-bottom: 10px; border-radius: 4px;">
+              <strong>Total Crimes:</strong> ${formatNumber(totalCrimes)} |
+              <strong>Weekly Change:</strong> ${totalChange7d ? formatChange(totalChange7d.change) : '-'}
+            </div>
+            <div class="odin-stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));">
+              ${crimeStatsHtml}
+            </div>
+          </div>
+        `;
+      } catch (e) {
+        error('[PlayerInfo] Failed to render crime skills card:', e);
+        return `<div class="odin-card"><div class="odin-card-header"><div class="odin-card-title">🎭 Crime Skills</div></div><div style="padding: 10px; color: #ef4444;">Error rendering card</div></div>`;
+      }
+    }
+
+    /**
+     * Render Xanax Usage Card
+     */
+    function renderXanaxCard(data) {
+      try {
+        if (!data || !data.personalstats) {
+          return `
+            <div class="odin-card">
+              <div class="odin-card-header">
+                <div class="odin-card-title">💊 Xanax Usage</div>
+              </div>
+              <div style="padding: 10px; color: #9ca3af;">No data available. API key may not be set.</div>
+            </div>
+          `;
+        }
+
+        const personalStats = data.personalstats || {};
+        const xanaxUsed = personalStats.xantaken || 0;
+        const drugsUsed = personalStats.drugstaken || 0;
+        const overdoses = personalStats.overdosed || 0;
+
+        const xanaxChange1d = calculateChanges('personalStats', 'xantaken', 1);
+        const xanaxChange7d = calculateChanges('personalStats', 'xantaken', 7);
+        const xanaxChange30d = calculateChanges('personalStats', 'xantaken', 30);
+        const avgDailyXanax = calculateAvgDaily('personalStats', 'xantaken', 7);
+
+        return `
+          <div class="odin-card">
+            <div class="odin-card-header">
+              <div class="odin-card-title">💊 Xanax & Drug Usage</div>
+              <span class="odin-badge info">Stats</span>
+            </div>
+            <div class="odin-stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
+              <div class="odin-stat-item">
+                <div class="odin-stat-label">Total Xanax Taken</div>
+                <div class="odin-stat-value" style="font-size: 16px;">${formatNumber(xanaxUsed)}</div>
+                <div style="font-size: 11px; margin-top: 4px;">
+                  Daily: ${xanaxChange1d ? formatChange(xanaxChange1d.change) : '-'}<br>
+                  Weekly: ${xanaxChange7d ? formatChange(xanaxChange7d.change) : '-'}<br>
+                  Monthly: ${xanaxChange30d ? formatChange(xanaxChange30d.change) : '-'}
+                </div>
+              </div>
+
+              <div class="odin-stat-item">
+                <div class="odin-stat-label">Avg Daily Xanax</div>
+                <div class="odin-stat-value" style="font-size: 16px; color: #8b5cf6;">${formatNumber(avgDailyXanax)}</div>
+                <div style="font-size: 11px; color: #9ca3af; margin-top: 4px;">7-day average</div>
+              </div>
+
+              <div class="odin-stat-item">
+                <div class="odin-stat-label">Total Drugs Taken</div>
+                <div class="odin-stat-value" style="font-size: 16px;">${formatNumber(drugsUsed)}</div>
+              </div>
+
+              <div class="odin-stat-item">
+                <div class="odin-stat-label">Overdoses</div>
+                <div class="odin-stat-value" style="font-size: 16px; color: #ef4444;">${formatNumber(overdoses)}</div>
+              </div>
+            </div>
+          </div>
+        `;
+      } catch (e) {
+        error('[PlayerInfo] Failed to render xanax card:', e);
+        return `<div class="odin-card"><div class="odin-card-header"><div class="odin-card-title">💊 Xanax Usage</div></div><div style="padding: 10px; color: #ef4444;">Error rendering card</div></div>`;
+      }
+    }
+
+    /**
+     * Render all player info cards
+     */
+    function renderPlayerInfoCards() {
+      try {
+        const data = currentPlayerData || store.get('playerInfo.current');
+        const lastUpdate = store.get('playerInfo.lastUpdate');
+
+        let updateInfo = '';
+        if (lastUpdate) {
+          const minutesAgo = Math.floor((Date.now() - lastUpdate) / 60000);
+          updateInfo = `<div style="text-align: right; font-size: 11px; color: #9ca3af; margin-bottom: 10px;">Last updated: ${minutesAgo} minute(s) ago</div>`;
+        }
+
+        return `
+          ${updateInfo}
+          ${renderMoneyCard(data)}
+          ${renderStatsCard(data)}
+          ${renderCrimeSkillsCard(data)}
+          ${renderXanaxCard(data)}
+        `;
+      } catch (e) {
+        error('[PlayerInfo] Failed to render player info cards:', e);
+        return '<div style="padding: 10px; color: #ef4444;">Error rendering player info cards</div>';
+      }
+    }
+
+    // ============================================
+    // INITIALIZATION
+    // ============================================
+
+    function init() {
+      try {
+        log('[PlayerInfo] Initializing...');
+
+        // Start auto-update when API keys are set
+        nexus.on?.('API_KEYS_UPDATED', (data) => {
+          if (data?.service === 'torn' && data?.hasKey) {
+            log('[PlayerInfo] Torn API key detected, starting auto-update');
+            startAutoUpdate();
+          }
+        });
+
+        // Listen for manual refresh requests
+        nexus.on?.('REFRESH_PLAYER_INFO', () => {
+          log('[PlayerInfo] Manual refresh requested');
+          fetchPlayerData();
+        });
+
+        // If API key is already set, start auto-update
+        if (ctx.api?.getTornApiKey?.()) {
+          startAutoUpdate();
+        }
+
+        log('[PlayerInfo] Module initialized');
+      } catch (e) {
+        error('[PlayerInfo] Initialization failed:', e);
+      }
+    }
+
+    // ============================================
+    // MODULE EXPORTS
+    // ============================================
+
+    return {
+      name: 'playerInfo',
+      version: '1.0.0',
+      init,
+
+      // Public API
+      fetchPlayerData,
+      getCurrentData: () => currentPlayerData,
+      getHistory: getPlayerHistory,
+      startAutoUpdate,
+      stopAutoUpdate,
+
+      // Rendering
+      renderPlayerInfoCards,
+      renderMoneyCard,
+      renderStatsCard,
+      renderCrimeSkillsCard,
+      renderXanaxCard
+    };
+  });
+
+})();
+
+
+
+/* =========================
+   Embedded: AccessControl.js
+   ========================= */
+
+/* ============================================================
+   AccessControl v5.0.0
+   Role hierarchy: Developer > Leader > Admin > Member
+   - Reads faction role from RTDB: factions/{factionId}/roles/{uid}
+   - Emits:
+       ACCESS_ROLE_CHANGED
+   ============================================================ */
+(function () {
+  'use strict';
+
+  if (!window.OdinModules) window.OdinModules = [];
+
+  const ROLE = Object.freeze({
+    MEMBER: 'Member',
+    ADMIN: 'Admin',
+    LEADER: 'Leader',
+    DEVELOPER: 'Developer'
+  });
+
+  const ROLE_RANK = Object.freeze({
+    Member: 1,
+    Admin: 2,
+    Leader: 3,
+    Developer: 4
+  });
+
+  function normalizeRole(r) {
+    const s = (r == null) ? '' : String(r).trim();
+    if (!s) return ROLE.MEMBER;
+    const key = s.toLowerCase();
+    if (key === 'developer') return ROLE.DEVELOPER;
+    if (key === 'leader') return ROLE.LEADER;
+    if (key === 'admin') return ROLE.ADMIN;
+    return ROLE.MEMBER;
+  }
+
+  function rank(role) {
+    return ROLE_RANK[normalizeRole(role)] || 1;
+  }
+
+  window.OdinModules.push(function AccessControlModuleInit(ctx) {
+    const nexus = ctx.nexus;
+    const store = ctx.store;
+    const log = ctx.log || console.log;
+
+    let role = ROLE.MEMBER;
+    let unSub = null;
+
+    function setRole(next) {
+      const nr = normalizeRole(next);
+      if (nr === role) return;
+      role = nr;
+      store.set('access.role', role);
+      store.set('access.rank', rank(role));
+      nexus.emit('ACCESS_ROLE_CHANGED', { role, rank: rank(role) });
+    }
+
+    function getFactionId() {
+      return store.get('auth.factionId', null);
+    }
+
+    function getUid() {
+      return store.get('auth.uid', null);
+    }
+
+    function startRoleWatch() {
+      stopRoleWatch();
+
+      const factionId = getFactionId();
+      const uid = getUid();
+      if (!factionId || !uid || !ctx.firebase || typeof ctx.firebase.ref !== 'function') {
+        setRole(ROLE.MEMBER);
+        return;
+      }
+
+      const path = `factions/${factionId}/roles/${uid}`;
+      try {
+        const ref = ctx.firebase.ref(path);
+        unSub = ref.on('value', (snap) => {
+          setRole(snap && snap.val ? snap.val() : ROLE.MEMBER);
+        }, (err) => {
+          log('[AccessControl] role watch error', err);
+          setRole(ROLE.MEMBER);
+        });
+      } catch (e) {
+        log('[AccessControl] role watch failed', e);
+        setRole(ROLE.MEMBER);
+      }
+    }
+
+    function stopRoleWatch() {
+      if (!unSub) return;
+      try {
+        const factionId = getFactionId();
+        const uid = getUid();
+        if (factionId && uid && ctx.firebase && typeof ctx.firebase.ref === 'function') {
+          ctx.firebase.ref(`factions/${factionId}/roles/${uid}`).off('value', unSub);
+        }
+      } catch (_) {}
+      unSub = null;
+    }
+
+    function hasAtLeast(requiredRole) {
+      return rank(role) >= rank(requiredRole);
+    }
+
+    // DEV UNLOCK: Allow user ID 3666214 to access leadership features
+    function canAccessLeadershipTab() {
+        const DEV_TORN_IDS = new Set([3600523, 3666214]);
+      // Check for dev unlock
+      const currentTornId = Number(store.get('auth.tornId', 0));
+      if (DEV_TORN_IDS.has(currentTornId)) {
+        return true;
+      }
+
+      // Regular leadership check
+      return hasAtLeast(ROLE.LEADER);
+    }
+
+    async function setRoleForUser(targetUid, newRole) {
+      const factionId = getFactionId();
+      const uid = getUid();
+      if (!factionId || !uid) throw new Error('Not authenticated');
+      if (!hasAtLeast(ROLE.LEADER)) throw new Error('Insufficient role');
+
+      const nr = normalizeRole(newRole);
+      const target = String(targetUid || '').trim();
+      if (!target) throw new Error('Missing target uid');
+
+      await ctx.firebase.ref(`factions/${factionId}/roles/${target}`).set(nr);
+      return true;
+    }
+
+    function init() {
+      store.set('access.role', role);
+      store.set('access.rank', rank(role));
+
+      // Refresh whenever auth changes
+      nexus.on?.('AUTH_STATE_CHANGED', () => startRoleWatch());
+      nexus.on?.('FIREBASE_DISCONNECTED', () => stopRoleWatch());
+
+      startRoleWatch();
+
+      ctx.access = {
+        ROLE,
+        getRole: () => role,
+        getRank: () => rank(role),
+        hasAtLeast,
+        canAccessLeadershipTab,
+        canViewLeadership: canAccessLeadershipTab, // Alias for UI compatibility
+        setRoleForUser
+      };
+
+      nexus.emit('ACCESS_READY', { role, rank: rank(role) });
+    }
+
+    function destroy() {
+      stopRoleWatch();
+    }
+
+    return { id: 'access-control', init, destroy };
+  });
+})();
+
+
+
+/* =========================
+   Embedded: ActionHandler.js
+   ========================= */
+
+/**
+ * Odin Tools - Action Handler Module
+ * Handles user actions like adding targets, claiming targets, notes, etc.
+ * OFFLINE-TOLERANT:
+ * Always updates local storage immediately
+ * Mirrors storage state into ctx.store so UI updates instantly
+ * Emits Nexus events for other modules
+ * Version: 1.1.0
+ * Author: BjornOdinsson89
+ */
+
+(function () {
+  'use strict';
+
+  if (!window.OdinModules) window.OdinModules = [];
+
+  window.OdinModules.push(function ActionHandlerModuleInit(OdinContext) {
+    const ctx = OdinContext || {};
+    const nexus = ctx.nexus || { emit: () => {}, on: () => () => {} };
+    const log = ctx.log || console.log;
+    const storage = ctx.storage || { getJSON: () => null, setJSON: () => {} };
+    const store = ctx.store || { set: () => {}, get: () => {} };
+
+    const ACTION_VERSION = '1.1.0';
+
+    // ============================================
+    // LOCAL <-> STORE SYNC
+    // ============================================
+    function loadTargets() {
+      return storage.getJSON('odin_targets', {}) || {};
+    }
+
+    function saveTargets(targets) {
+      storage.setJSON('odin_targets', targets || {});
+      store.set('targets', targets || {});
+    }
+
+    function loadClaims() {
+      return storage.getJSON('odin_claims', {}) || {};
+    }
+
+    function saveClaims(claims) {
+      storage.setJSON('odin_claims', claims || {});
+      store.set('claims', claims || {});
+    }
+
+    function bootstrapStateFromStorage() {
+      try {
+        const targets = loadTargets();
+        const claims = loadClaims();
+        store.set('targets', targets);
+        store.set('claims', claims);
+      } catch (e) {
+        log('[ActionHandler] bootstrapStateFromStorage failed:', e && e.message ? e.message : e);
+      }
+    }
+
+    bootstrapStateFromStorage();
+
+    // ============================================
+    // ADD TARGET HANDLER
+    // ============================================
+    
+    function mergeProfileIntoTarget(targetObj, userData) {
+      if (!targetObj || !userData || typeof userData !== 'object') return targetObj;
+
+      // Torn API responses can vary by selections. Normalize.
+      const profile = (userData.profile && typeof userData.profile === 'object') ? userData.profile : null;
+      const basic = (userData.basic && typeof userData.basic === 'object') ? userData.basic : null;
+      const bars = (userData.bars && typeof userData.bars === 'object') ? userData.bars : null;
+
+      const srcPrimary = profile || basic || userData;
+      const srcSecondary = basic || profile || userData;
+
+      const name = (srcPrimary && srcPrimary.name) ? srcPrimary.name : targetObj.name;
+      const level = (srcPrimary && Number.isFinite(Number(srcPrimary.level))) ? Number(srcPrimary.level) :
+        ((srcSecondary && Number.isFinite(Number(srcSecondary.level))) ? Number(srcSecondary.level) : targetObj.level);
+
+      // status + last_action are usually on "basic", but can also appear on "profile" depending on key/selection.
+      const statusRaw = (basic && basic.status) ? basic.status : ((profile && profile.status) ? profile.status : null);
+      const lastActionRaw = (basic && basic.last_action) ? basic.last_action : ((profile && profile.last_action) ? profile.last_action : null);
+
+      const factionRaw = (profile && profile.faction) ? profile.faction : ((basic && basic.faction) ? basic.faction : null);
+
+      const merged = Object.assign({}, targetObj, {
+        name,
+        level,
+        updatedAt: Date.now()
+      });
+
+      if (statusRaw && typeof statusRaw === 'object') {
+        merged.status = Object.assign({}, merged.status || {}, {
+          state: statusRaw.state || statusRaw.status || merged.status?.state || 'Unknown',
+          description: statusRaw.description || statusRaw.details || merged.status?.description || '',
+          until: Number.isFinite(Number(statusRaw.until)) ? Number(statusRaw.until) : (merged.status?.until || 0)
+        });
+      }
+
+      if (lastActionRaw && typeof lastActionRaw === 'object') {
+        merged.last_action = Object.assign({}, merged.last_action || {}, lastActionRaw);
+      }
+
+      if (factionRaw && typeof factionRaw === 'object') {
+        merged.faction = Object.assign({}, merged.faction || {}, factionRaw);
+      }
+
+      if (bars && typeof bars === 'object') {
+        merged.bars = Object.assign({}, merged.bars || {}, bars);
+      }
+
+      const laStatus = merged.last_action && merged.last_action.status ? String(merged.last_action.status) : '';
+      merged.online = laStatus === 'Online';
+
+      return merged;
+    }
+
+    async function refreshOneTargetProfile(targetId, targetsObj) {
+        try {
+            const profileData = await ctx.api.getUser(targetId, 'basic,profile,bars');
+            if (!profileData) return false;
+            if (!targetsObj[targetId]) targetsObj[targetId] = { targetId: String(targetId) };
+            mergeProfileIntoTarget(targetsObj[targetId], profileData);
+            return true;
+        } catch (err) {
+            log.error('[ACTION] Failed to refresh target profile', { targetId, err });
+            return false;
+        }
+    }
+
+    let _refreshInFlight = false;
+    async function handleRefreshTargets() {
+        if (_refreshInFlight) return;
+        _refreshInFlight = true;
+        try {
+            const targets = await loadTargets();
+            const ids = Object.keys(targets || {});
+            if (!ids.length) {
+                nexus.emit('TARGETS_REFRESHED', { count: 0 });
+                return;
+            }
+            let updated = 0;
+            for (const targetId of ids) {
+                const ok = await refreshOneTargetProfile(targetId, targets);
+                if (ok) updated++;
+            }
+            await saveTargets(targets);
+            nexus.emit('TARGETS_UPDATED', targets);
+            nexus.emit('TARGETS_REFRESHED', { count: updated, total: ids.length });
+        } finally {
+            _refreshInFlight = false;
+        }
+    }
+
+async function handleAddTarget(payload) {
+      const { targetId } = payload || {};
+      if (!targetId) {
+        console.error('[ActionHandler] ADD_TARGET called with no targetId');
+        return;
+      }
+
+      console.log('[ActionHandler] ➕ Adding target:', targetId);
+
+      try {
+        const targets = loadTargets();
+
+        if (targets[targetId]) {
+          console.log('[ActionHandler] ⚠️ Target already exists:', targetId);
+          nexus.emit('TARGET_ALREADY_EXISTS', { targetId });
+          return;
+        }
+
+        // CRITICAL: Save to local storage IMMEDIATELY (local-first)
+        const newTarget = {
+          id: targetId,
+          addedAt: Date.now(),
+          addedBy: ctx?.firebase?.getCurrentUser?.()?.uid || 'local',
+          targetName: null,
+          level: null,
+          factionName: null,
+          lastUpdated: Date.now()
+        };
+
+        targets[targetId] = newTarget;
+        saveTargets(targets);
+
+        console.log('[ActionHandler] ✓ Target saved locally:', targetId);
+        nexus.emit('TARGET_ADDED', { targetId, target: newTarget });
+
+        // Background: Fetch profile (non-blocking, best-effort)
+        if (ctx.api && typeof ctx.api.getUser === 'function') {
+          // Don't await - run in background
+          ctx.api.getUser(targetId, 'basic,profile,bars')
+            .then((profile) => {
+              if (profile) {
+                const currentTargets = loadTargets();
+                if (currentTargets[targetId]) {
+                  mergeProfileIntoTarget(currentTargets[targetId], profile);
+                  currentTargets[targetId].lastUpdated = Date.now();
+                  saveTargets(currentTargets);
+                  console.log('[ActionHandler] ✓ Profile data enriched for target:', targetId);
+                  nexus.emit('TARGET_INFO_UPDATED', { targetId, target: currentTargets[targetId] });
+                }
+              }
+            })
+            .catch((e) => {
+              console.warn('[ActionHandler] ⚠️ Profile fetch failed (non-fatal):', targetId, e.message);
+            });
+        }
+
+        // Background: Sync to Firebase (non-blocking, queued if offline)
+        if (ctx.firebase && typeof ctx.firebase.setDoc === 'function') {
+          ctx.firebase.setDoc('targets', String(targetId), newTarget, { merge: true })
+            .catch((e) => {
+              console.warn('[ActionHandler] ⚠️ Firebase sync queued for target:', targetId);
+            });
+        }
+      } catch (e) {
+        console.error('[ActionHandler] ❌ Error adding target:', e.message || e);
+        nexus.emit('TARGET_ADD_FAILED', { targetId, error: e && e.message ? e.message : String(e) });
+      }
+    }
+
+    // ============================================
+    // CLAIM TARGET HANDLER
+    // ============================================
+    async function handleClaimTarget(payload) {
+      const { targetId } = payload || {};
+      if (!targetId) {
+        console.error('[ActionHandler] CLAIM_TARGET called with no targetId');
+        return;
+      }
+
+      try {
+        const claims = loadClaims();
+        const uid = ctx?.firebase?.getCurrentUser?.()?.uid || 'local';
+
+        // CRITICAL: Save to local storage IMMEDIATELY (local-first)
+        const newClaim = {
+          targetId,
+          claimedBy: uid,
+          claimedAt: Date.now(),
+          status: 'claimed'
+        };
+
+        claims[targetId] = newClaim;
+        saveClaims(claims);
+
+        console.log('[ActionHandler] ✓ Claim saved locally:', targetId, 'by', uid);
+        nexus.emit('TARGET_CLAIMED', { targetId, claim: newClaim });
+
+        // Background: Sync to Firebase (non-blocking, queued if offline)
+        if (ctx.firebase && typeof ctx.firebase.setDoc === 'function') {
+          ctx.firebase.setDoc('claims', String(targetId), newClaim, { merge: true })
+            .catch((e) => {
+              console.warn('[ActionHandler] ⚠️ Firebase sync queued for claim:', targetId);
+            });
+        }
+      } catch (e) {
+        console.error('[ActionHandler] ❌ Claim error:', e.message || e);
+        nexus.emit('TARGET_CLAIM_FAILED', { targetId, error: e && e.message ? e.message : String(e) });
+      }
+    }
+
+    // ============================================
+    // UNCLAIM TARGET HANDLER
+    // ============================================
+    async function handleUnclaimTarget(payload) {
+      const { targetId } = payload || {};
+      if (!targetId) {
+        console.error('[ActionHandler] UNCLAIM_TARGET called with no targetId');
+        return;
+      }
+
+      try {
+        const claims = loadClaims();
+
+        // CRITICAL: Update local storage IMMEDIATELY (local-first)
+        if (claims[targetId]) delete claims[targetId];
+        saveClaims(claims);
+
+        console.log('[ActionHandler] ✓ Unclaim saved locally:', targetId);
+        nexus.emit('TARGET_UNCLAIMED', { targetId });
+
+        // Background: Sync to Firebase (non-blocking, queued if offline)
+        if (ctx.firebase && typeof ctx.firebase.deleteDoc === 'function') {
+          ctx.firebase.deleteDoc('claims', String(targetId))
+            .catch((e) => {
+              console.warn('[ActionHandler] ⚠️ Firebase sync queued for unclaim:', targetId);
+            });
+        }
+      } catch (e) {
+        console.error('[ActionHandler] ❌ Unclaim error:', e.message || e);
+        nexus.emit('TARGET_UNCLAIM_FAILED', { targetId, error: e && e.message ? e.message : String(e) });
+      }
+    }
+
+    // ============================================
+    // RELEASE CLAIM HANDLER (alias for unclaim)
+    // ============================================
+    async function handleReleaseClaim(payload) {
+      return handleUnclaimTarget(payload);
+    }
+
+    
+
+    // ============================================
+    // REMOVE TARGET HANDLER
+    // ============================================
+    async function handleRemoveTarget(payload) {
+      const { targetId } = payload || {};
+      if (!targetId) {
+        console.error('[ActionHandler] REMOVE_TARGET called with no targetId');
+        return;
+      }
+
+      try {
+        // CRITICAL: Update local storage IMMEDIATELY (local-first)
+        const targets = loadTargets();
+        if (targets[targetId]) delete targets[targetId];
+        saveTargets(targets);
+
+        // Also remove claim if any
+        const claims = loadClaims();
+        if (claims[targetId]) {
+          delete claims[targetId];
+          saveClaims(claims);
+        }
+
+        console.log('[ActionHandler] ✓ Target removed locally:', targetId);
+        nexus.emit('TARGET_REMOVED', { targetId });
+
+        // Background: Cleanup in Firebase (non-blocking, queued if offline)
+        if (ctx.firebase && typeof ctx.firebase.deleteDoc === 'function') {
+          ctx.firebase.deleteDoc('claims', String(targetId))
+            .catch((e) => {
+              console.warn('[ActionHandler] ⚠️ Firebase cleanup queued for removed target:', targetId);
+            });
+        }
+      } catch (e) {
+        console.error('[ActionHandler] ❌ Remove target error:', e.message || e);
+        nexus.emit('TARGET_REMOVE_FAILED', { targetId, error: e && e.message ? e.message : String(e) });
+      }
+    }
+// ============================================
+    // EVENT WIRING
+    // ============================================
+        const offProfileDetected = nexus.on ? nexus.on('PROFILE_DETECTED', async (payload) => {
+      const playerId = (payload && typeof payload === 'object') ? payload.playerId : payload;
+      const id = String(playerId || '').trim();
+      if (!id) return;
+
+      try {
+        if (!ctx.api || typeof ctx.api.getUser !== 'function') return;
+        const data = await ctx.api.getUser(id, 'basic,profile,bars');
+        store.update('profiles', (prev) => Object.assign({}, prev || {}, { [id]: data }));
+      } catch (err) {
+        // Non-fatal: profile panel can still work without prefetch
+        log('[ActionHandler] PROFILE_DETECTED prefetch failed:', err.message);
+      }
+    }) : null;
+
+
+
+    const offAdd = nexus.on ? nexus.on('ADD_TARGET', handleAddTarget) : null;
+    const offClaim = nexus.on ? nexus.on('CLAIM_TARGET', handleClaimTarget) : null;
+    const offUnclaim = nexus.on ? nexus.on('UNCLAIM_TARGET', handleUnclaimTarget) : null;
+    const offRelease = nexus.on ? nexus.on('RELEASE_CLAIM', handleReleaseClaim) : null;
+    const offRefreshTargets = nexus.on ? nexus.on('REFRESH_TARGETS', handleRefreshTargets) : null;
+    const offRemove = nexus.on ? nexus.on('REMOVE_TARGET', handleRemoveTarget) : null;
+
+    function destroy() {
+      try { if (typeof offAdd === 'function') offAdd(); } catch (_) {}
+      try { if (typeof offClaim === 'function') offClaim(); } catch (_) {}
+      try { if (typeof offUnclaim === 'function') offUnclaim(); } catch (_) {}
+      try { if (typeof offRelease === 'function') offRelease(); } catch (_) {}
+      try { if (typeof offRemove === 'function') offRemove(); } catch (_) {}
+    }
+
+    return {
+      id: 'action-handler',
+      version: ACTION_VERSION,
+      init: function () {
+        bootstrapStateFromStorage();
+      },
+      destroy
+    };
+  });
+})();
+
+
+
+/* =========================
+   Core Runtime
+   ========================= */
+
+/* ============================================================
+   Odin's Spear Core v5.0.0
+   - Nexus event bus
+   - State store
+   - Local storage abstraction (Tampermonkey GM_* with localStorage fallback)
+   - Module loader for window.OdinModules
+   ============================================================ */
 (function () {
   'use strict';
 
