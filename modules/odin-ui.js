@@ -1894,9 +1894,22 @@
     if (claimTickTimer) clearInterval(claimTickTimer);
     if (chainSimTimer) clearInterval(chainSimTimer);
 
-    }
+  });
 
     
+
+  // =========================
+  // Profile Injection Bootstrap
+  // =========================
+  try {
+    if (!window.__profileInjection) window.__profileInjection = createProfileInjectionModule();
+    __profileInjection = window.__profileInjection || null;
+    if (__profileInjection && typeof __profileInjection.init === 'function') __profileInjection.init();
+  } catch (e) {
+    // Non-fatal; UI can run without profile injection
+    if (ctx && ctx.logger && typeof ctx.logger.error === 'function') ctx.logger.error('ProfileInjection init failed', e);
+  }
+}
 
   // =========================
   //  ODIN PROFILE INJECTION (Merged)
