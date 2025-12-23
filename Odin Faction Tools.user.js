@@ -29,16 +29,10 @@
 // @require      https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js
 // @require      https://www.gstatic.com/firebasejs/10.7.1/firebase-functions-compat.js
 // @require      https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/main/modules/odins-spear-core.js
-// @require      https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/main/modules/LogManager.js
 // @require      https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/main/modules/FirebaseService.js
-// @require      https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/main/modules/AccessControl.js
 // @require      https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/main/modules/OdinApi.js
-// @require      https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/main/modules/PlayerInfo.js
-// @require      https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/main/modules/NeuralNetwork.js
 // @require      https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/main/modules/freki.js
-// @require      https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/main/modules/ActionHandler.js
-// @require      https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/main/modules/UIManager.js
-// @require      https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/main/modules/ui-profile-injection.js
+// @require      https://raw.githubusercontent.com/bjornodinsson89/Odin-Faction-Tools/main/modules/odin-ui.js
 // ==/UserScript==
 
 (function() {
