@@ -1,4 +1,4 @@
-rules_version = '2';
+rules_version = '3';
 // Odin Faction Tools - Firestore Security Rules
 // Version: 5.1.0
 service cloud.firestore {
@@ -53,6 +53,12 @@ service cloud.firestore {
 
       // Only Leader or Admin can update/delete targets
       allow update, delete: if factionMatch(factionId) && hasMinRole(factionId, 'Admin');
+    }
+
+
+    // Claims collection - faction-scoped access
+    match /factions/{factionId}/claims/{targetId} {
+      allow read, write: if factionMatch(factionId);
     }
 
     // Roles collection - read-only for faction members
