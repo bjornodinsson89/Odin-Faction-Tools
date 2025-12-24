@@ -2020,7 +2020,11 @@ async function handleAddTarget(payload) {
 
         // Background: Sync to Firebase (non-blocking, queued if offline)
         if (ctx.firebase && typeof ctx.firebase.setDoc === 'function') {
-          ctx.firebase.setDoc('targets', String(targetId), newTarget, { merge: true })
+          (() => {
+            const factionId = getFactionIdSafe();
+            if (!factionId) return Promise.resolve();
+            return ctx.firebase.setDoc(`factions/${factionId}/targets`, String(targetId), newTarget, { merge: true });
+          })()
             .catch((e) => {
               console.warn('[ActionHandler] ⚠️ Firebase sync queued for target:', targetId);
             });
@@ -2064,7 +2068,11 @@ async function handleAddTarget(payload) {
 
         // Background: Sync to Firebase (non-blocking, queued if offline)
         if (ctx.firebase && typeof ctx.firebase.setDoc === 'function') {
-          ctx.firebase.setDoc('claims', String(targetId), newClaim, { merge: true })
+          (() => {
+            const factionId = getFactionIdSafe();
+            if (!factionId) return Promise.resolve();
+            return ctx.firebase.setDoc(`factions/${factionId}/claims`, String(targetId), newClaim, { merge: true });
+          })()
             .catch((e) => {
               console.warn('[ActionHandler] ⚠️ Firebase sync queued for claim:', targetId);
             });
@@ -2097,7 +2105,11 @@ async function handleAddTarget(payload) {
 
         // Background: Sync to Firebase (non-blocking, queued if offline)
         if (ctx.firebase && typeof ctx.firebase.deleteDoc === 'function') {
-          ctx.firebase.deleteDoc('claims', String(targetId))
+          (() => {
+            const factionId = getFactionIdSafe();
+            if (!factionId) return Promise.resolve();
+            return ctx.firebase.deleteDoc(`factions/${factionId}/claims`, String(targetId));
+          })()
             .catch((e) => {
               console.warn('[ActionHandler] ⚠️ Firebase sync queued for unclaim:', targetId);
             });
@@ -2173,7 +2185,11 @@ function handleRemoveTarget(payload) {
 
         // Background: Cleanup in Firebase (non-blocking, queued if offline)
         if (ctx.firebase && typeof ctx.firebase.deleteDoc === 'function') {
-          ctx.firebase.deleteDoc('claims', String(targetId))
+          (() => {
+            const factionId = getFactionIdSafe();
+            if (!factionId) return Promise.resolve();
+            return ctx.firebase.deleteDoc(`factions/${factionId}/claims`, String(targetId));
+          })()
             .catch((e) => {
               console.warn('[ActionHandler] ⚠️ Firebase cleanup queued for removed target:', targetId);
             });
