@@ -1,8 +1,8 @@
-// ===========================
+// ==OdinModule==
 // @name        Odin-ui.js
 // @id          odin-ui-styles
 // @version     4.0.0
-// ===========================
+// ==/OdinModule==
 
 (function () {
   'use strict';
@@ -66,9 +66,10 @@
 
     #odin-wrapper {
       position: fixed;
-      top: 50%; left: 50%;
-      transform: translate(-50%, -50%);
-      width: 349px; height: 646px;
+      top: 0;
+      left: 0;
+      transform: none;
+      width: 340px; height: 549px;
       min-width: 340px; min-height: 520px;
       max-width: 95vw; max-height: 95vh;
       background: var(--glass);
@@ -92,8 +93,6 @@
         height: 88vh !important;
         min-width: 0 !important;
         min-height: 0 !important;
-        top: 50% !important;
-        left: 50% !important;
       }
     }
 
@@ -952,7 +951,7 @@
 
   function loadState() {
     const base = {
-      ui: { open: false, minimized: false, x: null, y: null, xPct: null, yPct: null, w: 349, h: 646 },
+      ui: { open: false, minimized: false, x: null, y: null, xPct: null, yPct: null, w: 340, h: 549 },
       settings: {
         api: { torn: '', tornstats: '', ffscouter: '' },
         prefs: { autoscore: false, showclaims: true, claimExpiryMin: 20 }
@@ -1865,11 +1864,7 @@ function reconcileGeometryForViewport(margin = 6) {
 function onMove(e) {
   if ((drag.active || resize.active) && e && e.cancelable) { try { e.preventDefault(); } catch (_) {} }
 
-  const vv = window.visualViewport;
-  const vp = vv
-    ? { left: Number(vv.offsetLeft) || 0, top: Number(vv.offsetTop) || 0, width: Number(vv.width) || window.innerWidth, height: Number(vv.height) || window.innerHeight }
-    : { left: 0, top: 0, width: window.innerWidth || document.documentElement.clientWidth, height: window.innerHeight || document.documentElement.clientHeight };
-
+  const vp = getViewportRect();
   const margin = 6;
 
   const getPoint = (ev) => {
@@ -1882,21 +1877,29 @@ function onMove(e) {
   if (drag.active) {
     const p = getPoint(e);
 
-    const w = wrapper.offsetWidth || 0;
-    const h = wrapper.offsetHeight || 0;
+    const ww = wrapper.offsetWidth || 0;
+    const hh = wrapper.offsetHeight || 0;
 
-    const nx = clamp(p.x - drag.shiftX, vp.left + margin, vp.left + vp.width - w - margin);
-    const ny = clamp(p.y - drag.shiftY, vp.top + margin, vp.top + vp.height - h - margin);
+    const minX = vp.left + margin;
+    const minY = vp.top + margin; // prevents header from going under address bar
+    const maxX = vp.left + vp.width - ww - margin;
+    const maxY = vp.top + vp.height - hh - margin;
+
+    let nx = p.x - drag.shiftX;
+    let ny = p.y - drag.shiftY;
+
+    nx = clamp(nx, minX, Math.max(minX, maxX));
+    ny = clamp(ny, minY, Math.max(minY, maxY));
 
     wrapper.style.transform = 'none';
-    wrapper.style.left = nx + 'px';
-    wrapper.style.top = ny + 'px';
+    wrapper.style.left = Math.round(nx) + 'px';
+    wrapper.style.top = Math.round(ny) + 'px';
 
     state.ui.x = nx;
     state.ui.y = ny;
 
-    const denomX = Math.max(1, (vp.width - w - (margin * 2)));
-    const denomY = Math.max(1, (vp.height - h - (margin * 2)));
+    const denomX = Math.max(1, (vp.width - ww - (margin * 2)));
+    const denomY = Math.max(1, (vp.height - hh - (margin * 2)));
     state.ui.xPct = clamp((nx - (vp.left + margin)) / denomX, 0, 1);
     state.ui.yPct = clamp((ny - (vp.top + margin)) / denomY, 0, 1);
   }
@@ -1913,13 +1916,14 @@ function onMove(e) {
     const nw = clamp(resize.startW + (p.x - resize.startX), minW, maxW);
     const nh = clamp(resize.startH + (p.y - resize.startY), minH, maxH);
 
-    wrapper.style.width = nw + 'px';
-    wrapper.style.height = nh + 'px';
+    wrapper.style.width = Math.round(nw) + 'px';
+    wrapper.style.height = Math.round(nh) + 'px';
 
     state.ui.w = nw;
     state.ui.h = nh;
 
-    reconcileGeometryForViewport(6);
+    // Keep the top-left anchored and clamped after resizing.
+    reconcileGeometryForViewport(margin);
   }
 }
 
