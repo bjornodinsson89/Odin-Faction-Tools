@@ -1594,27 +1594,71 @@ function renderSchedule() {
   let claimTickTimer = null;
 
   function applySavedGeometry() {
+  // Pixel-based positioning only; never rely on translate centering.
+  const vv = window.visualViewport;
+  const vp = vv
+    ? {
+        left: Number(vv.offsetLeft) || 0,
+        top: Number(vv.offsetTop) || 0,
+        width: Number(vv.width) || window.innerWidth || document.documentElement.clientWidth,
+        height: Number(vv.height) || window.innerHeight || document.documentElement.clientHeight
+      }
+    : {
+        left: 0,
+        top: 0,
+        width: window.innerWidth || document.documentElement.clientWidth,
+        height: window.innerHeight || document.documentElement.clientHeight
+      };
+
+  const margin = 6;
+
   const { x, y, w, h, xPct, yPct } = state.ui;
+
   if (typeof w === 'number' && w > 0) wrapper.style.width = w + 'px';
   if (typeof h === 'number' && h > 0) wrapper.style.height = h + 'px';
 
-  // If no explicit position saved, keep CSS-centered start position.
-  if (!Number.isFinite(xPct) && !Number.isFinite(yPct) && (typeof x !== 'number' || typeof y !== 'number')) return;
+  wrapper.style.transform = 'none';
 
-  // Prefer normalized geometry (stable across orientation/viewport changes)
-  if (Number.isFinite(xPct) && Number.isFinite(yPct)) {
-    if (applyNormalizedPosIfPresent(6)) {
-      reconcileGeometryForViewport(6);
-      return;
-    }
+  const ww = wrapper.offsetWidth || (typeof w === 'number' ? w : 0);
+  const hh = wrapper.offsetHeight || (typeof h === 'number' ? h : 0);
+
+  const maxX = vp.left + vp.width - ww - margin;
+  const maxY = vp.top + vp.height - hh - margin;
+
+  let nx;
+  let ny;
+
+  if (Number.isFinite(xPct) && Number.isFinite(yPct) && ww > 0 && hh > 0) {
+    const spanX = Math.max(0, vp.width - ww - (margin * 2));
+    const spanY = Math.max(0, vp.height - hh - (margin * 2));
+    nx = (vp.left + margin) + (clamp(xPct, 0, 1) * spanX);
+    ny = (vp.top + margin) + (clamp(yPct, 0, 1) * spanY);
+  } else if (typeof x === 'number' && typeof y === 'number') {
+    nx = x;
+    ny = y;
+  } else if (ww > 0 && hh > 0) {
+    nx = vp.left + (vp.width - ww) / 2;
+    ny = vp.top + (vp.height - hh) / 2;
+  } else {
+    nx = vp.left + margin;
+    ny = vp.top + margin;
   }
 
-  if (typeof x === 'number' && typeof y === 'number') {
-    wrapper.style.transform = 'none';
-    wrapper.style.left = x + 'px';
-    wrapper.style.top = y + 'px';
-    reconcileGeometryForViewport(6);
-  }
+  nx = clamp(nx, vp.left + margin, maxX);
+  ny = clamp(ny, vp.top + margin, maxY);
+
+  wrapper.style.left = nx + 'px';
+  wrapper.style.top = ny + 'px';
+
+  state.ui.x = nx;
+  state.ui.y = ny;
+
+  const denomX = Math.max(1, (vp.width - ww - (margin * 2)));
+  const denomY = Math.max(1, (vp.height - hh - (margin * 2)));
+  state.ui.xPct = clamp((nx - (vp.left + margin)) / denomX, 0, 1);
+  state.ui.yPct = clamp((ny - (vp.top + margin)) / denomY, 0, 1);
+
+  saveState();
 }
 
   function openUI() {
@@ -1774,771 +1818,160 @@ function applyNormalizedPosIfPresent(margin = 6) {
   } catch (_) { return false; }
 }
 
-function reconcileGeometryForViewport(margin = 6) {
-  if (applyNormalizedPosIfPresent(margin)) {
-    clampWrapperToViewport(margin);
-    updateNormalizedPosFromPx(margin);
-    return;
+function reconcileGeometryForViewport() {
+  const vv = window.visualViewport;
+  const vp = vv
+    ? { left: Number(vv.offsetLeft) || 0, top: Number(vv.offsetTop) || 0, width: Number(vv.width) || window.innerWidth, height: Number(vv.height) || window.innerHeight }
+    : { left: 0, top: 0, width: window.innerWidth || document.documentElement.clientWidth, height: window.innerHeight || document.documentElement.clientHeight };
+
+  const margin = 6;
+
+  wrapper.style.transform = 'none';
+
+  const w = wrapper.offsetWidth || (typeof state.ui.w === 'number' ? state.ui.w : 0);
+  const h = wrapper.offsetHeight || (typeof state.ui.h === 'number' ? state.ui.h : 0);
+
+  const maxX = vp.left + vp.width - w - margin;
+  const maxY = vp.top + vp.height - h - margin;
+
+  const spanX = Math.max(0, vp.width - w - (margin * 2));
+  const spanY = Math.max(0, vp.height - h - (margin * 2));
+
+  let nx;
+  let ny;
+
+  if (Number.isFinite(state.ui.xPct) && Number.isFinite(state.ui.yPct) && spanX >= 0 && spanY >= 0) {
+    nx = (vp.left + margin) + (clamp(state.ui.xPct, 0, 1) * spanX);
+    ny = (vp.top + margin) + (clamp(state.ui.yPct, 0, 1) * spanY);
+  } else {
+    const curX = (typeof state.ui.x === 'number') ? state.ui.x : (parseFloat(wrapper.style.left) || (vp.left + margin));
+    const curY = (typeof state.ui.y === 'number') ? state.ui.y : (parseFloat(wrapper.style.top) || (vp.top + margin));
+    nx = curX;
+    ny = curY;
   }
-  clampWrapperToViewport(margin);
-  updateNormalizedPosFromPx(margin);
+
+  nx = clamp(nx, vp.left + margin, maxX);
+  ny = clamp(ny, vp.top + margin, maxY);
+
+  wrapper.style.left = nx + 'px';
+  wrapper.style.top = ny + 'px';
+
+  state.ui.x = nx;
+  state.ui.y = ny;
+
+  const denomX = Math.max(1, (vp.width - w - (margin * 2)));
+  const denomY = Math.max(1, (vp.height - h - (margin * 2)));
+  state.ui.xPct = clamp((nx - (vp.left + margin)) / denomX, 0, 1);
+  state.ui.yPct = clamp((ny - (vp.top + margin)) / denomY, 0, 1);
 }
 
   function onMove(e) {
-    if ((drag.active || resize.active) && e && e.cancelable) e.preventDefault();
-    if (drag.active) {
-      const p = pointFromEvent(e);
-      const vp = getViewportRect();
+  const vv = window.visualViewport;
+  const vp = vv
+    ? { left: Number(vv.offsetLeft) || 0, top: Number(vv.offsetTop) || 0, width: Number(vv.width) || window.innerWidth, height: Number(vv.height) || window.innerHeight }
+    : { left: 0, top: 0, width: window.innerWidth || document.documentElement.clientWidth, height: window.innerHeight || document.documentElement.clientHeight };
 
-      const w = wrapper.offsetWidth;
-      const h = wrapper.offsetHeight;
+  const margin = 6;
 
-      const nx = clamp(p.x - drag.shiftX, vp.left + 6, vp.left + vp.width - w - 6);
-      const ny = clamp(p.y - drag.shiftY, vp.top + 6, vp.top + vp.height - h - 6);
+  const getPoint = (ev) => {
+    const t = (ev.touches && ev.touches[0]) ? ev.touches[0] : ((ev.changedTouches && ev.changedTouches[0]) ? ev.changedTouches[0] : ev);
+    const cx = Number(t.clientX) || 0;
+    const cy = Number(t.clientY) || 0;
+    return { x: cx + vp.left, y: cy + vp.top };
+  };
 
-      wrapper.style.left = nx + 'px';
-      wrapper.style.top = ny + 'px';
+  if (drag.active) {
+    try { e.preventDefault(); } catch (_) {}
 
-      state.ui.x = nx;
-      state.ui.y = ny;
-      updateNormalizedPosFromPx(6);
-    }
+    const p = getPoint(e);
+    const w = wrapper.offsetWidth || 0;
+    const h = wrapper.offsetHeight || 0;
 
-    if (resize.active) {
-      const p = pointFromEvent(e);
-      const vp = getViewportRect();
+    const maxX = vp.left + vp.width - w - margin;
+    const maxY = vp.top + vp.height - h - margin;
 
-      const nw = clamp(resize.startW + (p.x - resize.startX), 340, vp.width - 12);
-      const nh = clamp(resize.startH + (p.y - resize.startY), 240, vp.height - 12);
+    const nx = clamp(p.x - drag.shiftX, vp.left + margin, maxX);
+    const ny = clamp(p.y - drag.shiftY, vp.top + margin, maxY);
 
-      wrapper.style.width = nw + 'px';
-      wrapper.style.height = nh + 'px';
+    wrapper.style.transform = 'none';
+    wrapper.style.left = nx + 'px';
+    wrapper.style.top = ny + 'px';
 
-      state.ui.w = nw;
-      state.ui.h = nh;
+    state.ui.x = nx;
+    state.ui.y = ny;
 
-      reconcileGeometryForViewport(6);
-    }
+    const denomX = Math.max(1, (vp.width - w - (margin * 2)));
+    const denomY = Math.max(1, (vp.height - h - (margin * 2)));
+    state.ui.xPct = clamp((nx - (vp.left + margin)) / denomX, 0, 1);
+    state.ui.yPct = clamp((ny - (vp.top + margin)) / denomY, 0, 1);
+    return;
   }
 
-  function onUp() {
-    drag.active = false;
-    resize.active = false;
-    document.removeEventListener('mousemove', onMove, true);
-    document.removeEventListener('mouseup', onUp, true);
-    document.removeEventListener('touchmove', onMove, true);
-    document.removeEventListener('touchend', onUp, true);
-    document.removeEventListener('touchcancel', onUp, true);
-    reconcileGeometryForViewport(6);
-  saveState();
+  if (resize.active) {
+    try { e.preventDefault(); } catch (_) {}
+
+    const p = getPoint(e);
+
+    const minW = 340;
+    const minH = 240;
+
+    const maxW = Math.max(minW, vp.width - (margin * 2));
+    const maxH = Math.max(minH, vp.height - (margin * 2));
+
+    const nw = clamp(resize.startW + (p.x - resize.startX), minW, maxW);
+    const nh = clamp(resize.startH + (p.y - resize.startY), minH, maxH);
+
+    wrapper.style.width = nw + 'px';
+    wrapper.style.height = nh + 'px';
+
+    state.ui.w = nw;
+    state.ui.h = nh;
+
+    reconcileGeometryForViewport();
+  }
 }
 
   function startDrag(e) {
-    if (state.ui.minimized) return;
-    // Prevent page scroll/gesture while dragging on touch
-    if (e && e.cancelable) e.preventDefault();
-    drag.active = true;
-    const vp = getViewportRect();
-const rect = wrapper.getBoundingClientRect();
-const rectLeft = rect.left + vp.left;
-const rectTop = rect.top + vp.top;
+  if (drag.active || resize.active) return;
 
-const p = pointFromEvent(e);
-drag.shiftX = p.x - rectLeft;
-drag.shiftY = p.y - rectTop;
+  const target = e.target;
+  if (target && (target.closest('button') || target.closest('input') || target.closest('textarea') || target.closest('select') || target.closest('a'))) return;
 
-    wrapper.style.transform = 'none';
-    wrapper.style.left = rectLeft + 'px';
-    wrapper.style.top = rectTop + 'px';
+  const vv = window.visualViewport;
+  const vpLeft = vv ? (Number(vv.offsetLeft) || 0) : 0;
+  const vpTop = vv ? (Number(vv.offsetTop) || 0) : 0;
 
-    state.ui.x = rectLeft;
-    state.ui.y = rectTop;
-    updateNormalizedPosFromPx(6);
+  const getPoint = (ev) => {
+    const t = (ev.touches && ev.touches[0]) ? ev.touches[0] : ((ev.changedTouches && ev.changedTouches[0]) ? ev.changedTouches[0] : ev);
+    const cx = Number(t.clientX) || 0;
+    const cy = Number(t.clientY) || 0;
+    return { x: cx + vpLeft, y: cy + vpTop };
+  };
 
-    document.addEventListener('mousemove', onMove, true);
-    document.addEventListener('mouseup', onUp, true);
-    document.addEventListener('touchmove', onMove, { capture: true, passive: false });
-    document.addEventListener('touchend', onUp, { capture: true, passive: true });
-    document.addEventListener('touchcancel', onUp, { capture: true, passive: true });
+  wrapper.style.transform = 'none';
+
+  if (!(wrapper.style.left && wrapper.style.top)) {
+    applySavedGeometry();
   }
 
-  function startResize(e) {
-    if (state.ui.minimized) return;
-    resize.active = true;
-    const p = pointFromEvent(e);
-    resize.startX = p.x;
-    resize.startY = p.y;
-    resize.startW = wrapper.offsetWidth;
-    resize.startH = wrapper.offsetHeight;
+  const p = getPoint(e);
 
-    document.addEventListener('mousemove', onMove, true);
-    document.addEventListener('mouseup', onUp, true);
-    document.addEventListener('touchmove', onMove, { capture: true, passive: false });
-    document.addEventListener('touchend', onUp, { capture: true, passive: true });
-    document.addEventListener('touchcancel', onUp, { capture: true, passive: true });
-  }
+  const curX = (typeof state.ui.x === 'number') ? state.ui.x : (parseFloat(wrapper.style.left) || 0);
+  const curY = (typeof state.ui.y === 'number') ? state.ui.y : (parseFloat(wrapper.style.top) || 0);
 
-  function openModal(slotLabel) {
-    modalSlotPill.textContent = slotLabel || 'SLOT';
-    modalBackdrop.style.display = 'flex';
-    modalBackdrop.setAttribute('aria-hidden', 'false');
+  drag.active = true;
+  drag.shiftX = p.x - curX;
+  drag.shiftY = p.y - curY;
 
-    try {
-      const d = new Date();
-      const yyyy = d.getFullYear();
-      const mm = String(d.getMonth() + 1).padStart(2, '0');
-      const dd = String(d.getDate()).padStart(2, '0');
-      modalDate.value = `${yyyy}-${mm}-${dd}`;
-    } catch {}
-    modalTime.value = '04:00';
-  }
+  document.body.classList.add('odin-noselect');
 
-  function closeModal() {
-    modalBackdrop.style.display = 'none';
-    modalBackdrop.setAttribute('aria-hidden', 'true');
-  }
+  document.addEventListener('mousemove', onMove, { passive: false });
+  document.addEventListener('mouseup', onUp, { passive: true });
+  document.addEventListener('touchmove', onMove, { passive: false });
+  document.addEventListener('touchend', onUp, { passive: true });
+  document.addEventListener('touchcancel', onUp, { passive: true });
 
-  function ensureSeedData() {
-    // No placeholder/prototype data. Only structural migration/normalization.
-    if (!state.settings) state.settings = { api: { torn: '', tornstats: '', ffscouter: '' }, prefs: { autoscore: false, showclaims: true, claimExpiryMin: 20 } };
-    if (!Array.isArray(state.targets)) state.targets = [];
-    if (!Array.isArray(state.favorites)) state.favorites = [];
-    if (!Array.isArray(state.claims)) state.claims = [];
-    if (!Array.isArray(state.watchers)) state.watchers = [];
-    if (!state.schedule || typeof state.schedule !== 'object') state.schedule = { slots: {} };
-    if (!state.analytics || typeof state.analytics !== 'object') state.analytics = { hits: 0, respect: 0, assists: 0, wins: 0, losses: 0 };
-  }
-
-  function applySettingsToInputs() {
-    apiTorn.value = state.settings.api.torn || '';
-    apiTornStats.value = state.settings.api.tornstats || '';
-    apiFF.value = state.settings.api.ffscouter || '';
-    prefAutoscore.checked = !!state.settings.prefs.autoscore;
-    prefShowclaims.checked = !!state.settings.prefs.showclaims;
-    prefClaimExpiry.value = String(state.settings.prefs.claimExpiryMin || 20);
-  }
-
-  function pullSettingsFromInputs() {
-    state.settings.api.torn = (apiTorn.value || '').trim();
-    state.settings.api.tornstats = (apiTornStats.value || '').trim();
-    state.settings.api.ffscouter = (apiFF.value || '').trim();
-    state.settings.prefs.autoscore = !!prefAutoscore.checked;
-    state.settings.prefs.showclaims = !!prefShowclaims.checked;
-    state.settings.prefs.claimExpiryMin = parseInt(prefClaimExpiry.value, 10) || 20;
-  }
-
-  function claimTarget(targetId, type) {
-    const id = String(targetId || '').trim();
-    if (!id) return;
-
-    if (!state.settings.prefs.showclaims) {
-      toast('Enable claim buttons in Settings', 'warn');
-      return;
-    }
-
-    const expiryMin = Number(state.settings.prefs.claimExpiryMin || 20);
-
-    try {
-      nexus.emit?.('CLAIM_TARGET', { targetId: id, claimType: (type || 'attack'), expiryMin });
-      toast('Claiming…', 'info');
-    } catch (e) {
-      console.error('[ODIN_UI] Failed to emit CLAIM_TARGET:', e);
-      toast('Claim failed', 'bad');
-    }
-  }
-
-  function releaseClaim(targetId) {
-    const id = String(targetId || '').trim();
-    if (!id) return;
-
-    try {
-      nexus.emit?.('RELEASE_CLAIM', { targetId: id });
-      toast('Releasing…', 'info');
-    } catch (e) {
-      console.error('[ODIN_UI] Failed to emit RELEASE_CLAIM:', e);
-      toast('Release failed', 'bad');
-    }
-  }
-
-  function tickClaims() {
-    const before = state.claims.length;
-    const tnow = now();
-    state.claims = state.claims.filter(c => c.expiresAt > tnow);
-
-    for (const t of state.targets) {
-      if (t.claimExpiresAt && t.claimExpiresAt <= tnow) {
-        t.claimedBy = '';
-        t.claimType = '';
-        t.claimExpiresAt = 0;
-      }
-    }
-
-    if (state.claims.length !== before) saveState();
-    renderClaims();
-    renderTargets();
-  }
-
-  function startClaimTicker() {
-    if (claimTickTimer) return;
-    claimTickTimer = setInterval(tickClaims, 1000);
-  }
-
-  function toggleChainSim() {
-    if (chainSimTimer) {
-      clearInterval(chainSimTimer);
-      chainSimTimer = null;
-      toast('Chain sim stopped', 'info');
-      return;
-    }
-
-    toast('Chain sim running', 'ok');
-    chainSimTimer = setInterval(() => {
-      const text = chainEnemy.textContent || '215 / 01:45';
-      const m = text.match(/^(\d+)\s*\/\s*(\d{2}):(\d{2})$/);
-      if (!m) return;
-      const hits = parseInt(m[1], 10);
-      let mm = parseInt(m[2], 10);
-      let ss = parseInt(m[3], 10);
-      let total = mm * 60 + ss;
-      total = Math.max(0, total - 1);
-      mm = Math.floor(total / 60);
-      ss = total % 60;
-      chainEnemy.textContent = `${hits} / ${String(mm).padStart(2,'0')}:${String(ss).padStart(2,'0')}`;
-      renderChain();
-    }, 1000);
-  }
-
-  function recordOutcome(kind) {
-    if (kind === 'win') state.analytics.wins = (state.analytics.wins || 0) + 1;
-    if (kind === 'loss') state.analytics.losses = (state.analytics.losses || 0) + 1;
-    state.analytics.hits = (state.analytics.hits || 0) + 1;
-    state.analytics.respect = Math.round(((state.analytics.respect || 0) + (kind === 'win' ? 3.25 : 0.85)) * 100) / 100;
-    saveState();
-    renderAnalytics();
-  }
-
-  function generateRecs() {
-    recsList.textContent = '';
-    const list = [...state.targets].sort((a,b) => (b.frekiScore||0)-(a.frekiScore||0)).slice(0, 5);
-    if (!list.length) {
-      recsEmpty.style.display = 'block';
-      toast('Add targets first', 'warn');
-      return;
-    }
-    recsEmpty.style.display = 'none';
-
-    for (const t of list) {
-      const card = document.createElement('div');
-      card.className = 'odin-card';
-      card.style.marginBottom = '10px';
-      const scoreKind = t.frekiScore >= 80 ? 'ok' : t.frekiScore >= 65 ? 'warn' : 'bad';
-      card.innerHTML = `
-        <div class="card-header">
-          <span>${t.name} <span class="subtle">[#${t.id}]</span></span>
-          <span class="badge ${scoreKind}">FREKI ${t.frekiScore}</span>
-        </div>
-        <div class="data-row"><span class="data-label">Win Probability</span><span class="data-val">${t.winPct}%</span></div>
-        <div class="data-row"><span class="data-label">Reasoning</span><span class="data-val" style="color:var(--text-dim)">High score + favorable matchup</span></div>
-        <div class="row">
-          <button class="odin-btn block" data-action="attack" data-id="${t.id}">Attack</button>
-          <button class="odin-btn block btn-claim" data-action="claim" data-type="attack" data-id="${t.id}">Claim</button>
-        </div>
-      `;
-      recsList.appendChild(card);
-    }
-    toast('Recommendations generated', 'ok');
-  }
-
-  function clearRecs() {
-    recsList.textContent = '';
-    recsEmpty.style.display = 'block';
-    toast('Cleared', 'info');
-  }
-
-  // =========================
-  // 7) EVENT WIRING
-  // =========================
-  trigger.addEventListener('click', () => {
-    if (wrapper.style.display === 'flex') closeUI();
-    else openUI();
-  });
-
-  btnClose.addEventListener('click', closeUI);
-  btnMin.addEventListener('click', () => minimizeUI(false));
-
-  hud.addEventListener('mousedown', (e) => {
-    if (e.button !== 0) return;
-    if (e.target && (e.target.id === 'odin-close' || e.target.id === 'odin-minimize')) return;
-    startDrag(e);
-  }, true);
-
-  hud.addEventListener('touchstart', (e) => {
-    if (e.target && (e.target.id === 'odin-close' || e.target.id === 'odin-minimize')) return;
-    if (e.cancelable) e.preventDefault();
-    startDrag(e);
-  }, { capture: true, passive: false });
-
-  resizer.addEventListener('mousedown', (e) => {
-    e.preventDefault();
-    startResize(e);
-  }, true);
-
-  resizer.addEventListener('touchstart', (e) => {
-    e.preventDefault();
-    startResize(e);
-  }, { capture: true, passive: false });
-
-  modalBackdrop.addEventListener('click', (e) => {
-    if (e.target === modalBackdrop) closeModal();
-  });
-  modalCancel.addEventListener('click', closeModal);
-  modalConfirm.addEventListener('click', () => {
-    const d = modalDate.value || '';
-    const t = modalTime.value || '';
-    toast(`Deployed watcher: ${d} ${t} (${modalSlotPill.textContent})`, 'ok');
-    closeModal();
-  });
-
-  document.querySelectorAll('.nav-item').forEach(item => {
-    item.addEventListener('click', () => switchTab(item.dataset.pane));
-  });
-
-  wrapper.addEventListener('click', async (e) => {
-    const btn = e.target && e.target.closest ? e.target.closest('[data-action]') : null;
-    if (!btn) return;
-    const action = btn.getAttribute('data-action');
-
-    if (action === 'refresh-war') {
-      try { nexus.emit?.('WAR_REFRESH_REQUEST', { reason: 'ui' }); } catch (e) { console.warn('[ODIN_UI] WAR_REFRESH_REQUEST failed:', e); }
-      toast('Refreshing war data…', 'info');
-      return;
-    }
-    if (action === 'broadcast-chain') {
-      try { nexus.emit?.('CHAIN_BROADCAST_REQUEST', { reason: 'ui' }); } catch (e) { console.warn('[ODIN_UI] CHAIN_BROADCAST_REQUEST failed:', e); }
-      toast('Broadcasting chain alert…', 'info');
-      return;
-    }
-    if (action === 'open-chain-tab') { switchTab('analytics'); toast('Open Chain Tab', 'info'); return; }
-    if (action === 'toggle-chain-sim') { toggleChainSim(); return; }
-    if (action === 'open-schedule-tab') { switchTab('schedule'); return; }
-    if (action === 'open-scheduler-modal') { openModal('SCHEDULE'); return; }
-
-    if (action === 'add-target') {
-      const parsed = parseTargetInput(targetInput.value);
-      if (!parsed) { toast('Enter a valid Target ID or URL', 'bad'); return; }
-
-      const pri = targetPriority.value || 'medium';
-
-      try {
-        nexus.emit?.('ADD_TARGET', { targetId: parsed.id, priority: pri });
-      } catch (e) {
-        console.error('[ODIN_UI] Failed to emit ADD_TARGET:', e);
-        toast('Failed to add target', 'bad');
-        return;
-      }
-
-      targetInput.value = '';
-      toast('Adding target…', 'info');
-      return;
-    }
-
-    if (action === 'bulk-score') {
-      if (!state.targets.length) { toast('No targets to score', 'warn'); return; }
-      if (!ctx.freki || typeof ctx.freki.analyzeTarget !== 'function') { toast('Freki AI not available', 'bad'); return; }
-
-      toast('Scoring targets…', 'info');
-
-      const ids = state.targets.map(t => t.id);
-      const batchSize = 3;
-
-      for (let i = 0; i < ids.length; i += batchSize) {
-        const batch = ids.slice(i, i + batchSize);
-        await Promise.allSettled(batch.map(async (id) => {
-          const t = state.targets.find(x => x.id === id);
-          if (!t) return;
-          try {
-            const analysis = await ctx.freki.analyzeTarget(id, t);
-            const patch = normalizeFrekiPatch(analysis);
-            nexus.emit?.('UPDATE_TARGET', { targetId: id, patch });
-          } catch (e) {
-            console.warn('[ODIN_UI] Bulk score failed for', id, e);
-          }
-        }));
-      }
-
-      toast('Scoring complete', 'ok');
-      return;
-    }
-
-    if (action === 'clear-targets') {
-      const ids = state.targets.map(t => t.id);
-      for (const id of ids) {
-        try { nexus.emit?.('REMOVE_TARGET', { targetId: id }); } catch (_) {}
-      }
-      state.favorites = [];
-      saveState();
-      toast('Clearing targets…', 'info');
-      return;
-    }
-
-    if (action === 'attack') { toast(`Attack queued for #${btn.getAttribute('data-id')} `, 'info'); return; }
-
-    if (action === 'score') {
-      const id = btn.getAttribute('data-id');
-      const t = state.targets.find(x => x.id === id);
-      if (!id || !t) return;
-
-      if (!ctx.freki || typeof ctx.freki.analyzeTarget !== 'function') { toast('Freki AI not available', 'bad'); return; }
-
-      try {
-        const analysis = await ctx.freki.analyzeTarget(id, t);
-        const patch = normalizeFrekiPatch(analysis);
-        nexus.emit?.('UPDATE_TARGET', { targetId: id, patch });
-        toast(`Freki scored: ${patch.frekiScore ?? '—'}`, 'ok');
-      } catch (e) {
-        console.error('[ODIN_UI] Freki score failed:', e);
-        toast('Freki score failed', 'bad');
-      }
-      return;
-    }
-
-    if (action === 'remove-target') {
-      const id = btn.getAttribute('data-id');
-      if (!id) return;
-
-      try {
-        nexus.emit?.('REMOVE_TARGET', { targetId: id });
-      } catch (e) {
-        console.error('[ODIN_UI] Failed to emit REMOVE_TARGET:', e);
-        toast('Failed to remove target', 'bad');
-        return;
-      }
-
-      // Local-only favorites cleanup
-      state.favorites = state.favorites.filter(x => x !== id);
-      saveState();
-
-      toast('Removing target…', 'info');
-      return;
-    }
-
-    if (action === 'favorite') {
-      const id = btn.getAttribute('data-id');
-      if (!state.favorites.includes(id)) state.favorites.push(id);
-      saveState();
-      renderFavorites();
-      toast('Added to favorites', 'ok');
-      return;
-    }
-
-    if (action === 'unfavorite') {
-      const id = btn.getAttribute('data-id');
-      state.favorites = state.favorites.filter(x => x !== id);
-      saveState();
-      renderFavorites();
-      toast('Removed from favorites', 'info');
-      return;
-    }
-
-    if (action === 'claim') {
-      const id = btn.getAttribute('data-id');
-      const type = btn.getAttribute('data-type') || 'attack';
-      if (!state.settings.prefs.showclaims) { toast('Enable claim buttons in Settings', 'warn'); return; }
-      claimTarget(id, type);
-      return;
-    }
-
-    if (action === 'release-claim') { releaseClaim(btn.getAttribute('data-id')); return; }
-
-    if (action === 'remove-watcher') {
-      const id = btn.getAttribute('data-id');
-      state.watchers = state.watchers.filter(w => w.id !== id);
-      saveState();
-      renderWatchers();
-      toast('Watcher removed', 'info');
-      return;
-    }
-
-    if (action === 'pick-slot') {
-      const d = parseInt(btn.getAttribute('data-day'), 10);
-      const s = parseInt(btn.getAttribute('data-slot'), 10);
-      const label = `${DAYS[d]} ${SLOTS[s]}`;
-      openModal(label);
-      modalConfirm.onclick = () => {
-        const key = slotKey(d, s);
-        let me = null;
-        try { me = (ctx && ctx.store && typeof ctx.store.get === 'function') ? ctx.store.get('playerInfo.current', null) : null; } catch (_) { me = null; }
-        const meName = (me && typeof me === 'object' && me.name) ? String(me.name) : 'You';
-        const meId = (me && typeof me === 'object' && (me.player_id || me.playerId)) ? String(me.player_id || me.playerId) : null;
-
-        const slot = { tornId: meId, name: meName };
-        // Local-first: ActionHandler will persist locally immediately and queue DB sync
-        nexus.emit('UPSERT_SCHEDULE_SLOT', { key, dayIndex: d, slotIndex: s, slot });
-
-        toast(`Signed up: ${label}`, 'ok');
-        closeModal();
-      };
-      return;
-    }
-
-
-
-    if (action === 'analyze-coverage') { renderSchedule(); toast('Coverage analyzed', 'ok'); return; }
-
-    if (action === 'save-settings') {
-      pullSettingsFromInputs();
-      saveState();
-      renderTargets();
-
-      try {
-        const torn = (state.settings.api && state.settings.api.torn) ? String(state.settings.api.torn).trim() : '';
-        const tornstats = (state.settings.api && state.settings.api.tornstats) ? String(state.settings.api.tornstats).trim() : '';
-        const ffscouter = (state.settings.api && state.settings.api.ffscouter) ? String(state.settings.api.ffscouter).trim() : '';
-
-        nexus.emit?.('SET_API_KEYS', { torn, tornstats, ffscouter });
-      } catch (e) {
-        console.warn('[ODIN_UI] Failed to emit SET_API_KEYS:', e);
-      }
-
-      toast('Settings saved', 'ok');
-      return;
-    }
-
-    if (action === 'reset-settings') {
-      state.settings = loadState().settings;
-      saveState();
-      applySettingsToInputs();
-      renderTargets();
-      toast('Settings reset', 'info');
-      return;
-    }
-
-    if (action === 'record-win') { recordOutcome('win'); toast('Recorded WIN', 'ok'); return; }
-    if (action === 'record-loss') { recordOutcome('loss'); toast('Recorded LOSS', 'bad'); return; }
-
-    if (action === 'generate-recs') { generateRecs(); return; }
-    if (action === 'clear-recs') { clearRecs(); return; }
-  });
-
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-      if (modalBackdrop.style.display === 'flex') closeModal();
-      else if (wrapper.style.display === 'flex') closeUI();
-    }
-  });
-
-  if (targetsSort) targetsSort.addEventListener('change', () => renderTargets());
-
-  // =========================
-  // 8) INIT
-  // =========================
-
-  function syncTargetsFromStore() {
-    try {
-      const targetsObj = (ctx.store && typeof ctx.store.get === 'function') ? (ctx.store.get('targets') || {}) : {};
-      const claimsObj = (ctx.store && typeof ctx.store.get === 'function') ? (ctx.store.get('claims') || {}) : {};
-
-      const list = [];
-      for (const [id, t] of Object.entries(targetsObj)) {
-        if (!t || typeof t !== 'object') continue;
-        const claim = claimsObj[id] || null;
-
-        list.push({
-          id: String(id),
-          name: t.name || t.targetName || t.profile?.name || `#${id}`,
-          level: t.level ?? t.profile?.level ?? null,
-          status: t.status?.state || t.profile?.status?.state || t.status?.description || t.profile?.status?.description || '',
-          life: (t.life && typeof t.life === 'object') ? `${t.life.current ?? '—'}/${t.life.maximum ?? '—'}` : '',
-          frekiScore: t.frekiScore ?? null,
-          winPct: t.winPct ?? null,
-          difficulty: t.difficulty ?? '',
-          priority: t.priority ?? '',
-          claimedBy: claim?.claimedBy || '',
-          claimType: claim?.claimType || '',
-          claimExpiresAt: claim?.claimExpiresAt || 0
-        });
-      }
-
-      state.targets = list;
-      state.claims = Object.values(claimsObj || {});
-      renderTargets();
-      renderFavorites();
-      renderClaims();
-    } catch (e) {
-      console.error('[ODIN_UI] syncTargetsFromStore failed:', e);
-    }
-  }
-
-  function syncPlayerInfoFromStore() {
-    try {
-      const data = (ctx.store && typeof ctx.store.get === 'function') ? ctx.store.get('playerInfo.current') : null;
-      if (data) renderPersonal(data);
-    } catch (e) {
-      console.error('[ODIN_UI] syncPlayerInfoFromStore failed:', e);
-    }
-  }
-
-  function buildPersonalFieldMap() {
-    const pane = document.getElementById('pane-personal');
-    if (!pane) return null;
-
-    const map = new Map();
-    const rows = pane.querySelectorAll('.data-row');
-    rows.forEach((row) => {
-      const labelEl = row.querySelector('.data-label');
-      const valEl = row.querySelector('.data-val');
-      const label = labelEl ? labelEl.textContent.trim() : '';
-      if (label && valEl) map.set(label, valEl);
-    });
-    return map;
-  }
-
-  const __personalMap = buildPersonalFieldMap();
-
-  function setPersonal(label, value) {
-    if (!__personalMap) return;
-    const el = __personalMap.get(label);
-    if (!el) return;
-    el.textContent = (value == null || value === '') ? '—' : String(value);
-  }
-
-  function renderPersonal(data) {
-    if (!data || typeof data !== 'object') return;
-
-    setPersonal('Name', pick(data, ['name', 'profile.name']) || '—');
-    setPersonal('Level', pick(data, ['level', 'profile.level']) || '—');
-    setPersonal('Rank', pick(data, ['rank', 'profile.rank']) || '—');
-    setPersonal('Age', pick(data, ['age', 'profile.age']) || '—');
-    setPersonal('Marital status', pick(data, ['marital_status', 'profile.marital_status']) || '—');
-
-    const money = pick(data, ['money_onhand', 'money_on_hand', 'money.cash', 'money']);
-    setPersonal('Money', formatMoney(money));
-
-    const points = pick(data, ['points', 'points.points', 'points_balance']);
-    setPersonal('Points', Number.isFinite(Number(points)) ? formatInt(points) : '—');
-
-    const bank = pick(data, ['money_inbank', 'money_in_bank', 'bank', 'money.bank']);
-    setPersonal('Bank', formatMoney(bank));
-
-    const lifeCur = pick(data, ['life.current', 'bars.life.current']);
-    const lifeMax = pick(data, ['life.maximum', 'bars.life.maximum']);
-    if (lifeCur != null || lifeMax != null) setPersonal('Life', `${lifeCur ?? '—'}/${lifeMax ?? '—'}`);
-
-    const networth = pick(data, ['networth.total', 'networth.networth', 'networth']);
-    setPersonal('Networth', formatMoney(networth));
-
-    // Work stats
-    const ml = pick(data, ['manual_labor', 'workstats.manual_labor']);
-    const intel = pick(data, ['intelligence', 'workstats.intelligence']);
-    const endu = pick(data, ['endurance', 'workstats.endurance']);
-
-    setPersonal('Manual labor', ml != null ? formatInt(ml) : (pick(data, ['workstats.manual_labor']) != null ? formatInt(pick(data, ['workstats.manual_labor'])) : '—'));
-    setPersonal('Intelligence', intel != null ? formatInt(intel) : '—');
-    setPersonal('Endurance', endu != null ? formatInt(endu) : '—');
-
-    // Battle stats
-    const str = pick(data, ['strength', 'battlestats.strength']);
-    const def = pick(data, ['defense', 'battlestats.defense']);
-    const spd = pick(data, ['speed', 'battlestats.speed']);
-    const dex = pick(data, ['dexterity', 'battlestats.dexterity']);
-
-    setPersonal('Strength', str != null ? formatInt(str) : '—');
-    setPersonal('Defense', def != null ? formatInt(def) : '—');
-    setPersonal('Speed', spd != null ? formatInt(spd) : '—');
-    setPersonal('Dexterity', dex != null ? formatInt(dex) : '—');
-  }
-
-  function wireNexusSubscriptions() {
-    try {
-      nexus.on?.('TARGETS_UPDATED', syncTargetsFromStore);
-      nexus.on?.('TARGET_ADDED', syncTargetsFromStore);
-      nexus.on?.('TARGET_REMOVED', syncTargetsFromStore);
-      nexus.on?.('TARGET_INFO_UPDATED', syncTargetsFromStore);
-      nexus.on?.('TARGET_CLAIMED', syncTargetsFromStore);
-      nexus.on?.('TARGET_UNCLAIMED', syncTargetsFromStore);
-
-      nexus.on?.('PLAYER_INFO_UPDATED', (payload) => {
-        const data = payload && payload.data ? payload.data : payload;
-        renderPersonal(data);
-      });
-
-      nexus.on?.('WAR_UPDATED', (payload) => {
-        const war = payload && (payload.war || payload.data) ? (payload.war || payload.data) : payload;
-        renderWar(war);
-      });
-
-      nexus.on?.('CHAIN_UPDATED', (payload) => {
-        const chain = payload && (payload.chain || payload.data) ? (payload.chain || payload.data) : payload;
-        renderChain(chain);
-      });
-
-      nexus.on?.('ANALYTICS_UPDATED', (payload) => {
-        const a = payload && (payload.analytics || payload.data) ? (payload.analytics || payload.data) : payload;
-        renderAnalytics(a || {});
-        const acc = ctx.store?.get?.('analytics.accuracy');
-        renderAccuracy(acc || {});
-      });
-
-      nexus.on?.('ACCURACY_UPDATED', (payload) => {
-        const acc = payload && (payload.accuracy || payload.data) ? (payload.accuracy || payload.data) : payload;
-        renderAccuracy(acc || {});
-      });
-
-      nexus.on?.('FIREBASE_CONNECTED', () => { try { setBadge('db-pill', 'ok'); } catch (_) {} });
-      nexus.on?.('FIREBASE_DISCONNECTED', () => { try { setBadge('db-pill', 'bad'); } catch (_) {} });
-
-      nexus.on?.('SCHEDULE_UPDATED', (payload) => {
-        try {
-          if (payload && payload.schedule && typeof payload.schedule === 'object') {
-            if (!state.schedule || typeof state.schedule !== 'object') state.schedule = { slots: {} };
-            state.schedule.slots = (payload.schedule.slots && typeof payload.schedule.slots === 'object') ? payload.schedule.slots : {};
-            recomputeWatchersFromSchedule();
-            renderSchedule();
-            renderWatchers();
-            saveState();
-          } else {
-            syncScheduleFromStore();
-          }
-        } catch (_) {}
-      });
-    } catch (e) {
-      console.warn('[ODIN_UI] wireNexusSubscriptions failed:', e);
-    }
-  }
-
-  wireNexusSubscriptions();
-  syncTargetsFromStore();
-  syncPlayerInfoFromStore();
-  syncScheduleFromStore();
-  ensureSeedData();
-  applySavedGeometry();
-  applySettingsToInputs();
-  renderHeatmap();
-  renderAll();
-  startClaimTicker();
-
-  if (state.ui.open) openUI();
-  else closeUI();
-
-  window.addEventListener('beforeunload', () => {
-    if (claimTickTimer) clearInterval(claimTickTimer);
-    if (chainSimTimer) clearInterval(chainSimTimer);
-
-  });
-
-    
-
-  // =========================
-  // Profile Injection Bootstrap
-  // =========================
-  try {
-    if (!window.__profileInjection) window.__profileInjection = createProfileInjectionModule();
-    __profileInjection = window.__profileInjection || null;
-    if (__profileInjection && typeof __profileInjection.init === 'function') __profileInjection.init();
-  } catch (e) {
-    // Non-fatal; UI can run without profile injection
-    if (ctx && ctx.logger && typeof ctx.logger.error === 'function') ctx.logger.error('ProfileInjection init failed', e);
-  }
+  try { e.preventDefault(); } catch (_) {}
 }
 
   // =========================
