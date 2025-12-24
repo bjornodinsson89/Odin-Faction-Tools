@@ -463,7 +463,25 @@
       background: rgba(255,255,255,0.02);
       font-size: 12px;
     }
-  `);
+  
+  /* =========================
+     API INPUT STATUS
+     ========================= */
+  .odin-settings input.odin-api-saved {
+    border: 1px solid rgba(0, 255, 163, 0.7) !important;
+    box-shadow: 0 0 0 1px rgba(0, 255, 163, 0.25) inset !important;
+  }
+  .odin-settings input.odin-api-missing {
+    border: 1px solid rgba(255, 51, 51, 0.7) !important;
+    box-shadow: 0 0 0 1px rgba(255, 51, 51, 0.25) inset !important;
+  }
+  .odin-settings input.odin-api-saved::placeholder {
+    color: rgba(0, 255, 163, 0.95) !important;
+  }
+  .odin-settings input.odin-api-missing::placeholder {
+    color: rgba(255, 51, 51, 0.95) !important;
+  }
+`);
 
   // =========================
   // 2) DOM
@@ -852,11 +870,11 @@
             </div>
 
             <div class="row">
-              <input type="password" class="odin-input" id="api-torn" placeholder="TORN API KEY (required)" autocomplete="off">
-              <input type="password" class="odin-input" id="api-tornstats" placeholder="TORNSTATS KEY (optional)" autocomplete="off">
+              <input type="text" class="odin-input" id="api-torn" name="odin-api-torn" placeholder="TORN API KEY (required)" autocomplete="off">
+              <input type="text" class="odin-input" id="api-tornstats" name="odin-api-tornstats" placeholder="TORNSTATS KEY (optional)" autocomplete="off">
             </div>
             <div class="row" style="margin-top:10px">
-              <input type="password" class="odin-input" id="api-ffscouter" placeholder="FFSCOUTER KEY (optional)" autocomplete="off">
+              <input type="text" class="odin-input" id="api-ffscouter" name="odin-api-ffscouter" placeholder="FFSCOUTER KEY (optional)" autocomplete="off">
               <select class="odin-select" id="pref-claim-expiry">
                 <option value="10">Claim Expiry: 10 min</option>
                 <option value="20" selected>Claim Expiry: 20 min</option>
@@ -1365,10 +1383,8 @@
     }
   }
 
-  function renderAnalytics() {
-    statHits.textContent = String(state.analytics.hits ?? 0);
-    statRespect.textContent = String(state.analytics.respect ?? 0);
-    statAssists.textContent = String(state.analytics.assists ?? 0);
+  function renderAnalyticsFromState() {
+    renderAnalyticsData(state.analytics || {});
   }
 
   function renderHeatmap() {
@@ -1441,7 +1457,7 @@
     }
   }
 
-  function renderChain(chain) {
+  function renderChainData(chain) {
     try {
       if (!chain || typeof chain !== 'object') return;
 
@@ -1459,7 +1475,7 @@
     }
   }
 
-  function renderAnalytics(analytics) {
+  function renderAnalyticsData(analytics) {
     try {
       if (!analytics || typeof analytics !== 'object') return;
 
@@ -1550,7 +1566,7 @@ function renderSchedule() {
     scheduleGap.textContent = gaps ? `${gaps} open slots` : 'None';
   }
 
-  function renderChain() {
+  function renderChainRiskFromDom() {
     const enemyText = chainEnemy.textContent || '';
     const m = enemyText.match(/(\d+)\s*\/\s*(\d{2}:\d{2})/);
     const time = m ? m[2] : '01:45';
@@ -1577,9 +1593,10 @@ function renderSchedule() {
     renderFavorites();
     renderClaims();
     renderWatchers();
-    renderAnalytics();
+    renderAnalyticsFromState();
     renderSchedule();
-    renderChain();
+    renderChainData(state.chain || {});
+    renderChainRiskFromDom();
   }
 
   // =========================
@@ -1678,8 +1695,8 @@ function applySavedGeometry() {
     }
     try {
       renderWar(ctx.store?.get?.('war.current') || {});
-      renderChain(ctx.store?.get?.('chain.current') || {});
-      renderAnalytics(ctx.store?.get?.('analytics.session') || { hitsLanded: 0, totalRespect: 0, assists: 0 });
+      renderChainData(ctx.store?.get?.('chain.current') || {});
+      renderAnalyticsData(ctx.store?.get?.('analytics.session') || { hitsLanded: 0, totalRespect: 0, assists: 0 });
       renderAccuracy(ctx.store?.get?.('analytics.accuracy') || { wins: 0, losses: 0 });
       renderWatchers();
     } catch (_) {}
@@ -2029,19 +2046,43 @@ function startDrag(e) {
     if (!state.analytics || typeof state.analytics !== 'object') state.analytics = { hits: 0, respect: 0, assists: 0, wins: 0, losses: 0 };
   }
 
+  function setApiBoxState(inputEl, keyVal) {
+    if (!inputEl) return;
+    const has = !!(keyVal && String(keyVal).trim());
+    // Never render the key value into the DOM for security (and to avoid password-manager prompts).
+    inputEl.value = '';
+    inputEl.placeholder = has ? 'SAVED' : 'NOT SAVED';
+    inputEl.classList.toggle('odin-api-saved', has);
+    inputEl.classList.toggle('odin-api-missing', !has);
+
+    // Use attributes that discourage password managers on mobile.
+    inputEl.setAttribute('autocomplete', 'off');
+    inputEl.setAttribute('autocapitalize', 'off');
+    inputEl.setAttribute('autocorrect', 'off');
+    inputEl.setAttribute('spellcheck', 'false');
+    inputEl.setAttribute('inputmode', 'text');
+    inputEl.setAttribute('data-lpignore', 'true');
+    inputEl.setAttribute('data-form-type', 'other');
+  }
+
   function applySettingsToInputs() {
-    apiTorn.value = state.settings.api.torn || '';
-    apiTornStats.value = state.settings.api.tornstats || '';
-    apiFF.value = state.settings.api.ffscouter || '';
+    setApiBoxState(apiTorn, state.settings.api.torn);
+    setApiBoxState(apiTornStats, state.settings.api.tornstats);
+    setApiBoxState(apiFF, state.settings.api.ffscouter);
     prefAutoscore.checked = !!state.settings.prefs.autoscore;
     prefShowclaims.checked = !!state.settings.prefs.showclaims;
     prefClaimExpiry.value = String(state.settings.prefs.claimExpiryMin || 20);
   }
 
   function pullSettingsFromInputs() {
-    state.settings.api.torn = (apiTorn.value || '').trim();
-    state.settings.api.tornstats = (apiTornStats.value || '').trim();
-    state.settings.api.ffscouter = (apiFF.value || '').trim();
+    const tornIn = (apiTorn.value || '').trim();
+    const tornStatsIn = (apiTornStats.value || '').trim();
+    const ffIn = (apiFF.value || '').trim();
+
+    if (tornIn) state.settings.api.torn = tornIn;
+    if (tornStatsIn) state.settings.api.tornstats = tornStatsIn;
+    if (ffIn) state.settings.api.ffscouter = ffIn;
+
     state.settings.prefs.autoscore = !!prefAutoscore.checked;
     state.settings.prefs.showclaims = !!prefShowclaims.checked;
     state.settings.prefs.claimExpiryMin = parseInt(prefClaimExpiry.value, 10) || 20;
@@ -2124,7 +2165,8 @@ function startDrag(e) {
       mm = Math.floor(total / 60);
       ss = total % 60;
       chainEnemy.textContent = `${hits} / ${String(mm).padStart(2,'0')}:${String(ss).padStart(2,'0')}`;
-      renderChain();
+      renderChainData(state.chain || {});
+    renderChainRiskFromDom();
     }, 1000);
   }
 
@@ -2134,7 +2176,7 @@ function startDrag(e) {
     state.analytics.hits = (state.analytics.hits || 0) + 1;
     state.analytics.respect = Math.round(((state.analytics.respect || 0) + (kind === 'win' ? 3.25 : 0.85)) * 100) / 100;
     saveState();
-    renderAnalytics();
+    renderAnalyticsFromState();
   }
 
   function generateRecs() {
@@ -2408,6 +2450,7 @@ function startDrag(e) {
     if (action === 'save-settings') {
       pullSettingsFromInputs();
       saveState();
+      applySettingsToInputs();
       renderTargets();
 
       try {
@@ -2589,12 +2632,12 @@ function startDrag(e) {
 
       nexus.on?.('CHAIN_UPDATED', (payload) => {
         const chain = payload && (payload.chain || payload.data) ? (payload.chain || payload.data) : payload;
-        renderChain(chain);
+        renderChainData(chain);
       });
 
       nexus.on?.('ANALYTICS_UPDATED', (payload) => {
         const a = payload && (payload.analytics || payload.data) ? (payload.analytics || payload.data) : payload;
-        renderAnalytics(a || {});
+        renderAnalyticsData(a || {});
         const acc = ctx.store?.get?.('analytics.accuracy');
         renderAccuracy(acc || {});
       });
