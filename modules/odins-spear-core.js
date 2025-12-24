@@ -1507,8 +1507,30 @@
       refreshSessionAnalytics();
       ensureAccuracyStore();
 
-      warTimer = setInterval(refreshWar, 30000);
-      chainTimer = setInterval(refreshChain, 30000);
+      // Adaptive war/chain polling:
+      // - 30s when no active chain
+      // - 5s when chain is active (timeout > 0)
+      const isChainActive = () => {
+        const c = store?.get?.('chain.current');
+        const t = c && (c.ourTimeout != null ? Number(c.ourTimeout) : Number(c.timeout));
+        return Number.isFinite(t) && t > 0;
+      };
+
+      const scheduleNextTick = (delayMs) => {
+        if (warTimer) clearTimeout(warTimer);
+        warTimer = setTimeout(async () => {
+          try {
+            await refreshChain();
+            await refreshWar();
+          } finally {
+            scheduleNextTick(isChainActive() ? 5000 : 30000);
+          }
+        }, delayMs);
+      };
+
+      scheduleNextTick(0);
+
+      // Session analytics can stay at 60s
       statsTimer = setInterval(refreshSessionAnalytics, 60000);
     }
 
