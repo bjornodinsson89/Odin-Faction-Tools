@@ -495,15 +495,15 @@
 
             <div class="data-row">
               <span class="data-label">Friendly Score</span>
-              <span class="data-val" style="color:var(--odin-cyan)" id="war-friendly-score">14,285 pts</span>
+              <span class="data-val" style="color:var(--odin-cyan)" id="war-friendly-score">—</span>
             </div>
             <div class="data-row">
               <span class="data-label">Enemy Score</span>
-              <span class="data-val" style="color:var(--berserker-red)" id="war-enemy-score">12,042 pts</span>
+              <span class="data-val" style="color:var(--berserker-red)" id="war-enemy-score">—</span>
             </div>
             <div class="score-bar" aria-label="War score bar">
-              <div class="score-friendly" id="war-friendly-bar" style="width: 55%;"></div>
-              <div class="score-enemy" id="war-enemy-bar" style="width: 45%;"></div>
+              <div class="score-friendly" id="war-friendly-bar" style="width: 50%;"></div>
+              <div class="score-enemy" id="war-enemy-bar" style="width: 50%;"></div>
             </div>
 
             <div class="row">
@@ -519,15 +519,15 @@
             </div>
             <div class="data-row">
               <span class="data-label">Our Chain</span>
-              <span class="data-val" style="color:var(--odin-cyan)" id="chain-our">482 / 03:12</span>
+              <span class="data-val" style="color:var(--odin-cyan)" id="chain-our">—</span>
             </div>
             <div class="data-row">
               <span class="data-label">Enemy Chain</span>
-              <span class="data-val" style="color:var(--berserker-red)" id="chain-enemy">215 / 01:45</span>
+              <span class="data-val" style="color:var(--berserker-red)" id="chain-enemy">—</span>
             </div>
             <div class="data-row">
               <span class="data-label">Recommendation</span>
-              <span class="data-val" style="color:var(--freki-gold)" id="chain-rec">High Window</span>
+              <span class="data-val" style="color:var(--freki-gold)" id="chain-rec">—</span>
             </div>
 
             <div class="row">
@@ -539,7 +539,7 @@
           <div class="odin-card">
             <div class="card-header">
               <span>Active Watchers</span>
-              <span class="badge ok" id="watcher-coverage">COVERAGE 67%</span>
+              <span class="badge ok" id="watcher-coverage">COVERAGE —</span>
             </div>
             <div class="roster-wrap">
               <table class="odin-table" id="watchers-table">
@@ -663,13 +663,13 @@
               <span class="badge cyan">LOCAL</span>
             </div>
 
-            <div class="data-row"><span class="data-label">Hits Landed</span><span class="data-val" id="stat-hits">142</span></div>
-            <div class="data-row"><span class="data-label">Total Respect</span><span class="data-val" id="stat-respect">482.12</span></div>
-            <div class="data-row"><span class="data-label">Assists</span><span class="data-val" id="stat-assists">12</span></div>
+            <div class="data-row"><span class="data-label">Hits Landed</span><span class="data-val" id="stat-hits">0</span></div>
+            <div class="data-row"><span class="data-label">Total Respect</span><span class="data-val" id="stat-respect">0</span></div>
+            <div class="data-row"><span class="data-label">Assists</span><span class="data-val" id="stat-assists">0</span></div>
 
             <div class="hr"></div>
 
-            <div class="data-row"><span class="data-label">Freki Model</span><span class="data-val">v4.0.0</span></div>
+            <div class="data-row"><span class="data-label">Freki Model</span><span class="data-val">—</span></div>
             <div class="data-row"><span class="data-label">Training Samples</span><span class="data-val">—</span></div>
             <div class="data-row"><span class="data-label">Connection</span><span class="data-val"><span class="badge cyan">UI MODE</span></span></div>
           </div>
@@ -680,7 +680,7 @@
               <span class="subtle">Metrics</span>
             </div>
             <div class="empty">
-              Hook this to your real outcome recorder later. This UI is ready for: win/loss, confidence buckets, and drift graphs.
+              —
             </div>
             <div class="row">
               <button class="odin-btn block" data-action="record-win">Record WIN</button>
@@ -1091,6 +1091,70 @@
   const chainEnemy = document.getElementById('chain-enemy');
   const chainRisk = document.getElementById('chain-risk-badge');
   const chainRec = document.getElementById('chain-rec');
+  const chainOur = document.getElementById('chain-our');
+
+  const warFriendlyScore = document.getElementById('war-friendly-score');
+  const warEnemyScore = document.getElementById('war-enemy-score');
+  const warFriendlyBar = document.getElementById('war-friendly-bar');
+  const warEnemyBar = document.getElementById('war-enemy-bar');
+  const warConnBadge = document.getElementById('war-connection-badge');
+
+  const watcherCoverage = document.getElementById('watcher-coverage');
+
+  const analyticsFrekiModelVal = (() => {
+    const pane = document.getElementById('pane-analytics');
+    if (!pane) return null;
+    const labels = pane.querySelectorAll('.data-row');
+    for (const row of labels) {
+      const lab = row.querySelector('.data-label');
+      if (lab && lab.textContent && lab.textContent.trim() === 'Freki Model') {
+        return row.querySelector('.data-val');
+      }
+    }
+    return null;
+  })();
+
+  const analyticsTrainingSamplesVal = (() => {
+    const pane = document.getElementById('pane-analytics');
+    if (!pane) return null;
+    const labels = pane.querySelectorAll('.data-row');
+    for (const row of labels) {
+      const lab = row.querySelector('.data-label');
+      if (lab && lab.textContent && lab.textContent.trim() === 'Training Samples') {
+        return row.querySelector('.data-val');
+      }
+    }
+    return null;
+  })();
+
+  const analyticsConnBadge = (() => {
+    const pane = document.getElementById('pane-analytics');
+    if (!pane) return null;
+    // Find the Connection row and return the inner badge element if present
+    const rows = pane.querySelectorAll('.data-row');
+    for (const row of rows) {
+      const lab = row.querySelector('.data-label');
+      if (lab && lab.textContent && lab.textContent.trim() === 'Connection') {
+        return row.querySelector('.badge');
+      }
+    }
+    return null;
+  })();
+
+  const accuracyEmpty = (() => {
+    const pane = document.getElementById('pane-analytics');
+    if (!pane) return null;
+    const cards = pane.querySelectorAll('.odin-card');
+    if (!cards || !cards.length) return null;
+    // Accuracy Tracker is the second card in this pane
+    for (const card of cards) {
+      const header = card.querySelector('.card-header');
+      if (header && header.textContent && header.textContent.includes('Accuracy Tracker')) {
+        return card.querySelector('.empty');
+      }
+    }
+    return null;
+  })();
 
   const scheduleTbody = document.querySelector('#schedule-table tbody');
   const scheduleCoverage = document.getElementById('schedule-coverage');
@@ -1273,6 +1337,16 @@
 
   function renderWatchers() {
     watchersTbody.textContent = '';
+    try {
+      if (watcherCoverage) {
+        const total = 7 * 6;
+        const filled = state.schedule && state.schedule.slots ? Object.keys(state.schedule.slots).length : 0;
+        const pct = total ? Math.round((filled / total) * 100) : 0;
+        watcherCoverage.textContent = `COVERAGE ${pct}%`;
+        watcherCoverage.classList.remove('ok', 'bad', 'cyan', 'warn');
+        watcherCoverage.classList.add(pct >= 80 ? 'ok' : pct >= 50 ? 'warn' : 'bad');
+      }
+    } catch (_) {}
     const list = state.watchers.slice(0, 12);
     for (const w of list) {
       const badgeClass = w.status === 'LIVE' ? 'ok' : w.status === 'AWAY' ? 'warn' : '';
@@ -1317,7 +1391,126 @@
     return `${dayIdx}:${slotIdx}`;
   }
 
-  function renderSchedule() {
+  
+
+  function fmtPts(n) {
+    if (n === null || n === undefined || Number.isNaN(Number(n))) return '—';
+    const v = Number(n);
+    if (!Number.isFinite(v)) return '—';
+    return v.toLocaleString() + ' pts';
+  }
+
+  function fmtNum(n, digits = 0) {
+    if (n === null || n === undefined || Number.isNaN(Number(n))) return '—';
+    const v = Number(n);
+    if (!Number.isFinite(v)) return '—';
+    return v.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  }
+
+  function fmtTimeFromSeconds(sec) {
+    if (sec === null || sec === undefined || Number.isNaN(Number(sec))) return '—';
+    const s = Math.max(0, Math.floor(Number(sec)));
+    const mm = String(Math.floor(s / 60)).padStart(2, '0');
+    const ss = String(s % 60).padStart(2, '0');
+    return `${mm}:${ss}`;
+  }
+
+  function renderWar(war) {
+    try {
+      if (!war || typeof war !== 'object') return;
+
+      if (warConnBadge) {
+        const online = war.online === true;
+        warConnBadge.textContent = online ? 'LIVE' : 'OFFLINE';
+        warConnBadge.classList.remove('ok', 'bad', 'cyan', 'warn');
+        warConnBadge.classList.add(online ? 'ok' : 'cyan');
+      }
+
+      if (warFriendlyScore) warFriendlyScore.textContent = war.friendlyScore != null ? fmtPts(war.friendlyScore) : '—';
+      if (warEnemyScore) warEnemyScore.textContent = war.enemyScore != null ? fmtPts(war.enemyScore) : '—';
+
+      const f = Number(war.friendlyScore || 0);
+      const e = Number(war.enemyScore || 0);
+      const total = Math.max(1, f + e);
+      const fp = Math.max(0, Math.min(100, Math.round((f / total) * 100)));
+      const ep = 100 - fp;
+
+      if (warFriendlyBar) warFriendlyBar.style.width = `${fp}%`;
+      if (warEnemyBar) warEnemyBar.style.width = `${ep}%`;
+    } catch (e) {
+      console.warn('[ODIN_UI] renderWar failed:', e);
+    }
+  }
+
+  function renderChain(chain) {
+    try {
+      if (!chain || typeof chain !== 'object') return;
+
+      if (chainOur) chainOur.textContent = chain.ourText || '—';
+      if (chainEnemy) chainEnemy.textContent = chain.enemyText || '—';
+      if (chainRec) chainRec.textContent = chain.recommendation || '—';
+
+      if (chainRisk) {
+        chainRisk.textContent = chain.riskText || 'RISK: —';
+        chainRisk.classList.remove('ok', 'bad', 'cyan', 'warn');
+        chainRisk.classList.add(chain.riskClass || 'warn');
+      }
+    } catch (e) {
+      console.warn('[ODIN_UI] renderChain failed:', e);
+    }
+  }
+
+  function renderAnalytics(analytics) {
+    try {
+      if (!analytics || typeof analytics !== 'object') return;
+
+      if (statHits) statHits.textContent = fmtNum(analytics.hitsLanded || 0, 0);
+      if (statRespect) statRespect.textContent = fmtNum(analytics.totalRespect || 0, 2);
+      if (statAssists) statAssists.textContent = fmtNum(analytics.assists || 0, 0);
+
+      if (analyticsFrekiModelVal) {
+        const v = (ctx.freki && ctx.freki.version) ? `v${String(ctx.freki.version)}` : '—';
+        analyticsFrekiModelVal.textContent = v;
+      }
+      if (analyticsTrainingSamplesVal) {
+        let samples = null;
+        try {
+          if (ctx.freki && typeof ctx.freki.getTrainingStats === 'function') {
+            const st = ctx.freki.getTrainingStats();
+            if (st && typeof st.samples === 'number') samples = st.samples;
+          }
+        } catch (_) {}
+        analyticsTrainingSamplesVal.textContent = samples != null ? fmtNum(samples, 0) : '—';
+      }
+
+      if (analyticsConnBadge) {
+        const s = (ctx.store && typeof ctx.store.get === 'function') ? ctx.store.get('db.status') : null;
+        const online = s && (s === 'connected' || s === 'online');
+        analyticsConnBadge.textContent = online ? 'DB LIVE' : 'LOCAL';
+        analyticsConnBadge.classList.remove('ok', 'bad', 'cyan', 'warn');
+        analyticsConnBadge.classList.add(online ? 'ok' : 'cyan');
+      }
+    } catch (e) {
+      console.warn('[ODIN_UI] renderAnalytics failed:', e);
+    }
+  }
+
+  function renderAccuracy(acc) {
+    try {
+      if (!accuracyEmpty) return;
+      const a = acc && typeof acc === 'object' ? acc : {};
+      const wins = Number(a.wins || 0);
+      const losses = Number(a.losses || 0);
+      const total = wins + losses;
+      const wr = total ? Math.round((wins / total) * 100) : 0;
+      accuracyEmpty.textContent = total
+        ? `Recorded outcomes: ${wins} win / ${losses} loss (Winrate ${wr}%).`
+        : 'No outcomes recorded yet. Use the buttons below after fights to train Freki + track accuracy.';
+    } catch (e) {
+      console.warn('[ODIN_UI] renderAccuracy failed:', e);
+    }
+  }
+function renderSchedule() {
     scheduleTbody.textContent = '';
 
     for (let s = 0; s < SLOTS.length; s++) {
@@ -1416,6 +1609,13 @@
     state.ui.open = true;
     if (state.ui.minimized) minimizeUI(true);
     applySavedGeometry();
+    try {
+      renderWar(ctx.store?.get?.('war.current') || {});
+      renderChain(ctx.store?.get?.('chain.current') || {});
+      renderAnalytics(ctx.store?.get?.('analytics.session') || { hitsLanded: 0, totalRespect: 0, assists: 0 });
+      renderAccuracy(ctx.store?.get?.('analytics.accuracy') || { wins: 0, losses: 0 });
+      renderWatchers();
+    } catch (_) {}
     saveState();
   }
 
@@ -1771,8 +1971,16 @@
     if (!btn) return;
     const action = btn.getAttribute('data-action');
 
-    if (action === 'refresh-war') { toast('War data refreshed ', 'ok'); return; }
-    if (action === 'broadcast-chain') { toast('Chain alert broadcast ', 'warn'); return; }
+    if (action === 'refresh-war') {
+      try { nexus.emit?.('WAR_REFRESH_REQUEST', { reason: 'ui' }); } catch (e) { console.warn('[ODIN_UI] WAR_REFRESH_REQUEST failed:', e); }
+      toast('Refreshing war data…', 'info');
+      return;
+    }
+    if (action === 'broadcast-chain') {
+      try { nexus.emit?.('CHAIN_BROADCAST_REQUEST', { reason: 'ui' }); } catch (e) { console.warn('[ODIN_UI] CHAIN_BROADCAST_REQUEST failed:', e); }
+      toast('Broadcasting chain alert…', 'info');
+      return;
+    }
     if (action === 'open-chain-tab') { switchTab('analytics'); toast('Open Chain Tab', 'info'); return; }
     if (action === 'toggle-chain-sim') { toggleChainSim(); return; }
     if (action === 'open-schedule-tab') { switchTab('schedule'); return; }
@@ -2115,6 +2323,28 @@
       nexus.on?.('PLAYER_INFO_UPDATED', (payload) => {
         const data = payload && payload.data ? payload.data : payload;
         renderPersonal(data);
+      });
+
+      nexus.on?.('WAR_UPDATED', (payload) => {
+        const war = payload && (payload.war || payload.data) ? (payload.war || payload.data) : payload;
+        renderWar(war);
+      });
+
+      nexus.on?.('CHAIN_UPDATED', (payload) => {
+        const chain = payload && (payload.chain || payload.data) ? (payload.chain || payload.data) : payload;
+        renderChain(chain);
+      });
+
+      nexus.on?.('ANALYTICS_UPDATED', (payload) => {
+        const a = payload && (payload.analytics || payload.data) ? (payload.analytics || payload.data) : payload;
+        renderAnalytics(a || {});
+        const acc = ctx.store?.get?.('analytics.accuracy');
+        renderAccuracy(acc || {});
+      });
+
+      nexus.on?.('ACCURACY_UPDATED', (payload) => {
+        const acc = payload && (payload.accuracy || payload.data) ? (payload.accuracy || payload.data) : payload;
+        renderAccuracy(acc || {});
       });
 
       nexus.on?.('FIREBASE_CONNECTED', () => { try { setBadge('db-pill', 'ok'); } catch (_) {} });
