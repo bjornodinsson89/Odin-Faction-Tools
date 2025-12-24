@@ -68,7 +68,7 @@
       position: fixed;
       top: 50%; left: 50%;
       transform: translate(-50%, -50%);
-      width: 349px; height: 646px;
+      width: 410px; height: 760px;
       min-width: 340px; min-height: 520px;
       max-width: 95vw; max-height: 95vh;
       background: var(--glass);
@@ -952,7 +952,7 @@
 
   function loadState() {
     const base = {
-      ui: { open: false, minimized: false, x: null, y: null, w: 349, h: 646 },
+      ui: { open: false, minimized: false, x: null, y: null, xPct: null, yPct: null, w: 349, h: 646 },
       settings: {
         api: { torn: '', tornstats: '', ffscouter: '' },
         prefs: { autoscore: false, showclaims: true, claimExpiryMin: 20 }
@@ -986,44 +986,7 @@
     localStorage.setItem(LS_KEY, JSON.stringify(state));
   }
 
-  
-function getViewportRect() {
-  const vv = window.visualViewport;
-  if (vv) {
-    return { left: vv.offsetLeft || 0, top: vv.offsetTop || 0, width: vv.width || window.innerWidth || document.documentElement.clientWidth, height: vv.height || window.innerHeight || document.documentElement.clientHeight };
-  }
-  return { left: 0, top: 0, width: window.innerWidth || document.documentElement.clientWidth, height: window.innerHeight || document.documentElement.clientHeight };
-}
-
-function clampWrapperToViewport(margin = 6) {
-  try {
-    const vp = getViewportRect();
-    const w = wrapper.offsetWidth || 0;
-    const h = wrapper.offsetHeight || 0;
-
-    // If centered (transform translate) don't clamp here.
-    const hasPxPos = wrapper.style.transform === 'none' && wrapper.style.left && wrapper.style.top;
-    if (!hasPxPos) return;
-
-    const curX = parseFloat(wrapper.style.left) || 0;
-    const curY = parseFloat(wrapper.style.top) || 0;
-
-    const maxX = vp.left + vp.width - w - margin;
-    const maxY = vp.top + vp.height - h - margin;
-
-    const nx = clamp(curX, vp.left + margin, maxX);
-    const ny = clamp(curY, vp.top + margin, maxY);
-
-    if (nx !== curX) wrapper.style.left = nx + 'px';
-    if (ny !== curY) wrapper.style.top = ny + 'px';
-
-    state.ui.x = nx;
-    state.ui.y = ny;
-    saveState();
-  } catch (_) {}
-}
-
-function clamp(n, min, max) { return Math.max(min, Math.min(max, n)); }
+  function clamp(n, min, max) { return Math.max(min, Math.min(max, n)); }
 
   function toast(message, kind = 'info') {
     const toasts = document.getElementById('odin-toasts');
@@ -1626,20 +1589,30 @@ function renderSchedule() {
   let state = loadState();
   let drag = { active: false, shiftX: 0, shiftY: 0 };
   let resize = { active: false, startX: 0, startY: 0, startW: 0, startH: 0 };
+  let viewportBound = false;
   let chainSimTimer = null;
   let claimTickTimer = null;
-  let viewportBound = false;
 
   function applySavedGeometry() {
-    const { x, y, w, h } = state.ui;
-    if (typeof w === 'number' && w > 0) wrapper.style.width = w + 'px';
-    if (typeof h === 'number' && h > 0) wrapper.style.height = h + 'px';
-    if (typeof x === 'number' && typeof y === 'number') {
-      wrapper.style.transform = 'none';
-      wrapper.style.left = x + 'px';
-      wrapper.style.top = y + 'px';
-      clampWrapperToViewport(6);
+  const { x, y, w, h, xPct, yPct } = state.ui;
+  if (typeof w === 'number' && w > 0) wrapper.style.width = w + 'px';
+  if (typeof h === 'number' && h > 0) wrapper.style.height = h + 'px';
+
+  if (Number.isFinite(xPct) && Number.isFinite(yPct)) {
+    if (applyNormalizedPosIfPresent(6)) {
+      reconcileGeometryForViewport(6);
+      return;
     }
+  }
+
+  if (typeof x === 'number' && typeof y === 'number') {
+    wrapper.style.transform = 'none';
+    wrapper.style.left = x + 'px';
+    wrapper.style.top = y + 'px';
+    reconcileGeometryForViewport(6);
+  }
+}
+
   }
 
   function openUI() {
@@ -1648,15 +1621,17 @@ function renderSchedule() {
     state.ui.open = true;
     if (state.ui.minimized) minimizeUI(true);
     applySavedGeometry();
-    if (!viewportBound) {
-      viewportBound = true;
-      window.addEventListener('resize', () => clampWrapperToViewport(6), { passive: true });
-      window.addEventListener('orientationchange', () => setTimeout(() => clampWrapperToViewport(6), 0), { passive: true });
-      if (window.visualViewport) {
-        window.visualViewport.addEventListener('resize', () => clampWrapperToViewport(6), { passive: true });
-        window.visualViewport.addEventListener('scroll', () => clampWrapperToViewport(6), { passive: true });
-      }
-    }
+reconcileGeometryForViewport(6);
+if (!viewportBound) {
+  viewportBound = true;
+  window.addEventListener('resize', () => reconcileGeometryForViewport(6), { passive: true });
+  window.addEventListener('orientationchange', () => setTimeout(() => reconcileGeometryForViewport(6), 0), { passive: true });
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', () => reconcileGeometryForViewport(6), { passive: true });
+    window.visualViewport.addEventListener('scroll', () => reconcileGeometryForViewport(6), { passive: true });
+  }
+}
+
     try {
       renderWar(ctx.store?.get?.('war.current') || {});
       renderChain(ctx.store?.get?.('chain.current') || {});
@@ -1699,14 +1674,114 @@ function renderSchedule() {
   }
 
   function pointFromEvent(e) {
-  const vv = window.visualViewport;
-  const ox = vv ? (vv.offsetLeft || 0) : 0;
-  const oy = vv ? (vv.offsetTop || 0) : 0;
+    if (e.touches && e.touches[0]) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    if (e.changedTouches && e.changedTouches[0]) return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
+    return { x: e.clientX, y: e.clientY };
+  }
 
-  if (e.touches && e.touches[0]) return { x: e.touches[0].clientX + ox, y: e.touches[0].clientY + oy };
-  if (e.changedTouches && e.changedTouches[0]) return { x: e.changedTouches[0].clientX + ox, y: e.changedTouches[0].clientY + oy };
-  return { x: (e.clientX || 0) + ox, y: (e.clientY || 0) + oy };
+function getViewportRect() {
+  const vv = window.visualViewport;
+  if (vv) {
+    return {
+      left: Number(vv.offsetLeft) || 0,
+      top: Number(vv.offsetTop) || 0,
+      width: Number(vv.width) || window.innerWidth || document.documentElement.clientWidth,
+      height: Number(vv.height) || window.innerHeight || document.documentElement.clientHeight
+    };
+  }
+  return {
+    left: 0,
+    top: 0,
+    width: window.innerWidth || document.documentElement.clientWidth,
+    height: window.innerHeight || document.documentElement.clientHeight
+  };
 }
+
+function clampWrapperToViewport(margin = 6) {
+  try {
+    const hasPxPos = wrapper.style.transform === 'none' && wrapper.style.left && wrapper.style.top;
+    if (!hasPxPos) return;
+
+    const vp = getViewportRect();
+    const w = wrapper.offsetWidth || 0;
+    const h = wrapper.offsetHeight || 0;
+
+    const curX = parseFloat(wrapper.style.left) || 0;
+    const curY = parseFloat(wrapper.style.top) || 0;
+
+    const maxX = vp.left + vp.width - w - margin;
+    const maxY = vp.top + vp.height - h - margin;
+
+    const nx = clamp(curX, vp.left + margin, maxX);
+    const ny = clamp(curY, vp.top + margin, maxY);
+
+    if (nx !== curX) wrapper.style.left = nx + 'px';
+    if (ny !== curY) wrapper.style.top = ny + 'px';
+
+    state.ui.x = nx;
+    state.ui.y = ny;
+  } catch (_) {}
+}
+
+function updateNormalizedPosFromPx(margin = 6) {
+  try {
+    const hasPxPos = wrapper.style.transform === 'none' && wrapper.style.left && wrapper.style.top;
+    if (!hasPxPos) return;
+
+    const vp = getViewportRect();
+    const w = wrapper.offsetWidth || 0;
+    const h = wrapper.offsetHeight || 0;
+
+    const x = parseFloat(wrapper.style.left) || 0;
+    const y = parseFloat(wrapper.style.top) || 0;
+
+    const denomX = Math.max(1, (vp.width - w - (margin * 2)));
+    const denomY = Math.max(1, (vp.height - h - (margin * 2)));
+
+    const xp = (x - (vp.left + margin)) / denomX;
+    const yp = (y - (vp.top + margin)) / denomY;
+
+    state.ui.xPct = clamp(xp, 0, 1);
+    state.ui.yPct = clamp(yp, 0, 1);
+  } catch (_) {}
+}
+
+function applyNormalizedPosIfPresent(margin = 6) {
+  try {
+    const xp = state.ui.xPct;
+    const yp = state.ui.yPct;
+    if (!Number.isFinite(xp) || !Number.isFinite(yp)) return false;
+
+    const vp = getViewportRect();
+    const w = wrapper.offsetWidth || 0;
+    const h = wrapper.offsetHeight || 0;
+
+    const maxXSpan = Math.max(0, vp.width - w - (margin * 2));
+    const maxYSpan = Math.max(0, vp.height - h - (margin * 2));
+
+    const nx = (vp.left + margin) + (xp * maxXSpan);
+    const ny = (vp.top + margin) + (yp * maxYSpan);
+
+    wrapper.style.transform = 'none';
+    wrapper.style.left = nx + 'px';
+    wrapper.style.top = ny + 'px';
+
+    state.ui.x = nx;
+    state.ui.y = ny;
+    return true;
+  } catch (_) { return false; }
+}
+
+function reconcileGeometryForViewport(margin = 6) {
+  if (applyNormalizedPosIfPresent(margin)) {
+    clampWrapperToViewport(margin);
+    updateNormalizedPosFromPx(margin);
+    return;
+  }
+  clampWrapperToViewport(margin);
+  updateNormalizedPosFromPx(margin);
+}
+
 
   function onMove(e) {
     if (drag.active) {
@@ -1719,12 +1794,13 @@ function renderSchedule() {
       const nx = clamp(p.x - drag.shiftX, vp.left + 6, vp.left + vp.width - w - 6);
       const ny = clamp(p.y - drag.shiftY, vp.top + 6, vp.top + vp.height - h - 6);
 
+      wrapper.style.transform = 'none';
       wrapper.style.left = nx + 'px';
       wrapper.style.top = ny + 'px';
 
       state.ui.x = nx;
       state.ui.y = ny;
-      saveState();
+      updateNormalizedPosFromPx(6);
     }
 
     if (resize.active) {
@@ -1739,8 +1815,8 @@ function renderSchedule() {
 
       state.ui.w = nw;
       state.ui.h = nh;
-      saveState();
-      clampWrapperToViewport(6);
+
+      reconcileGeometryForViewport(6);
     }
   }
 
@@ -1752,25 +1828,25 @@ function renderSchedule() {
     document.removeEventListener('touchmove', onMove, true);
     document.removeEventListener('touchend', onUp, true);
     document.removeEventListener('touchcancel', onUp, true);
-    clampWrapperToViewport(6);
-  }
+   reconcileGeometryForViewport(6);
+  saveState();
+}
 
   function startDrag(e) {
     if (state.ui.minimized) return;
     drag.active = true;
     const vp = getViewportRect();
-    const rect = wrapper.getBoundingClientRect();
-    // rect.* are visual-viewport coords; convert to layout-viewport coords by adding vv offsets
-    const rectLeft = rect.left + vp.left;
-    const rectTop = rect.top + vp.top;
+const rect = wrapper.getBoundingClientRect();
+const rectLeft = rect.left + vp.left;
+const rectTop = rect.top + vp.top;
 
-    const p = pointFromEvent(e); // already in layout-viewport coords
-    drag.shiftX = p.x - rectLeft;
-    drag.shiftY = p.y - rectTop;
+const p = pointFromEvent(e);
+drag.shiftX = p.x - rectLeft;
+drag.shiftY = p.y - rectTop;
 
     wrapper.style.transform = 'none';
-    wrapper.style.left = rectLeft + 'px';
-    wrapper.style.top = rectTop + 'px';
+    wrapper.style.left = rect.left + 'px';
+    wrapper.style.top = rect.top + 'px';
 
     state.ui.x = rect.left;
     state.ui.y = rect.top;
