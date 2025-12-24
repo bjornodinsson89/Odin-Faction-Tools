@@ -1371,12 +1371,122 @@
       store.set('claims', claims || {});
     }
 
-    function bootstrapStateFromStorage() {
+    
+    // ============================================
+    // WATCHERS / SCHEDULE (LOCAL-FIRST + FIRESTORE SYNC)
+    // ============================================
+
+    function loadSchedule() {
+      const sched = storage.getJSON('odin_schedule', null);
+      if (sched && typeof sched === 'object' && sched.slots && typeof sched.slots === 'object') return sched;
+      return { slots: {} };
+    }
+
+    function saveSchedule(schedule) {
+      const next = (schedule && typeof schedule === 'object') ? schedule : { slots: {} };
+      if (!next.slots || typeof next.slots !== 'object') next.slots = {};
+      next.updatedAt = Date.now();
+
+      storage.setJSON('odin_schedule', next);
+      store.set('schedule', next);
+    }
+
+    function getFactionIdSafe() {
+      try {
+        const fid = store.get('auth.factionId', null);
+        return fid ? String(fid) : null;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function initScheduleRemoteSync() {
+      if (!ctx.firebase || typeof ctx.firebase.onSnapshot !== 'function') return;
+      const factionId = getFactionIdSafe();
+      if (!factionId) return;
+
+      // Listen for remote schedule updates (best-effort; non-fatal)
+      try {
+        ctx.firebase.onSnapshot(`factions/${factionId}/schedule`, 'week', (doc) => {
+          if (!doc || typeof doc !== 'object') return;
+          const slots = (doc.slots && typeof doc.slots === 'object') ? doc.slots : null;
+          if (!slots) return;
+
+          const local = loadSchedule();
+          const merged = Object.assign({}, local, doc, { slots: Object.assign({}, local.slots || {}, slots) });
+          saveSchedule(merged);
+
+          nexus.emit('SCHEDULE_UPDATED', { source: 'remote', schedule: merged });
+        }, (err) => {
+          console.warn('[ActionHandler] Schedule onSnapshot error (non-fatal):', err && err.message ? err.message : err);
+        });
+      } catch (e) {
+        console.warn('[ActionHandler] Schedule remote sync init failed (non-fatal):', e && e.message ? e.message : e);
+      }
+    }
+
+    function persistScheduleToRemote(schedule) {
+      if (!ctx.firebase || typeof ctx.firebase.setDoc !== 'function') return;
+      const factionId = getFactionIdSafe();
+      if (!factionId) return;
+
+      // Background: Firestore write (non-blocking; queued if offline)
+      try {
+        ctx.firebase.setDoc(`factions/${factionId}/schedule`, 'week', schedule, { merge: true })
+          .catch(() => {
+            console.warn('[ActionHandler] ⚠️ Schedule write queued (offline or transient)');
+          });
+      } catch (e) {
+        console.warn('[ActionHandler] ⚠️ Schedule write failed (non-fatal):', e && e.message ? e.message : e);
+      }
+    }
+
+    function handleUpsertScheduleSlot(payload) {
+      const p = payload || {};
+      const key = String(p.key || '').trim();
+      if (!key) {
+        console.error('[ActionHandler] UPSERT_SCHEDULE_SLOT called with no key');
+        return;
+      }
+
+      const schedule = loadSchedule();
+      if (!schedule.slots || typeof schedule.slots !== 'object') schedule.slots = {};
+
+      const slot = (p.slot && typeof p.slot === 'object') ? p.slot : null;
+      if (!slot || (!slot.name && !slot.tornId)) {
+        // Treat empty slot as delete
+        if (schedule.slots[key]) {
+          delete schedule.slots[key];
+          saveSchedule(schedule);
+          persistScheduleToRemote(schedule);
+          nexus.emit('SCHEDULE_SLOT_UPDATED', { key, slot: null, schedule });
+          nexus.emit('SCHEDULE_UPDATED', { source: 'local', schedule });
+        }
+        return;
+      }
+
+      const nextSlot = {
+        tornId: slot.tornId ? String(slot.tornId) : null,
+        name: slot.name ? String(slot.name) : '',
+        updatedAt: Date.now()
+      };
+
+      schedule.slots[key] = nextSlot;
+      saveSchedule(schedule);
+      persistScheduleToRemote(schedule);
+
+      nexus.emit('SCHEDULE_SLOT_UPDATED', { key, slot: nextSlot, schedule });
+      nexus.emit('SCHEDULE_UPDATED', { source: 'local', schedule });
+    }
+
+function bootstrapStateFromStorage() {
       try {
         const targets = loadTargets();
         const claims = loadClaims();
+        const schedule = loadSchedule();
         store.set('targets', targets);
         store.set('claims', claims);
+        store.set('schedule', schedule);
       } catch (e) {
         log('[ActionHandler] bootstrapStateFromStorage failed:', e && e.message ? e.message : e);
       }
@@ -1726,6 +1836,11 @@ function handleRemoveTarget(payload) {
     const offRefreshTargets = nexus.on ? nexus.on('REFRESH_TARGETS', handleRefreshTargets) : null;
     const offRemove = nexus.on ? nexus.on('REMOVE_TARGET', handleRemoveTarget) : null;
     const offUpdateTarget = nexus.on ? nexus.on('UPDATE_TARGET', handleUpdateTarget) : null;
+    const offUpsertSchedule = nexus.on ? nexus.on('UPSERT_SCHEDULE_SLOT', handleUpsertScheduleSlot) : null;
+    const offAuthSchedule = nexus.on ? nexus.on('AUTH_STATE_CHANGED', () => initScheduleRemoteSync()) : null;
+
+    // Best-effort: init schedule remote sync immediately (in case auth is already available)
+    initScheduleRemoteSync();
 
     function destroy() {
       try { if (typeof offAdd === 'function') offAdd(); } catch (_) {}
@@ -1734,6 +1849,8 @@ function handleRemoveTarget(payload) {
       try { if (typeof offRelease === 'function') offRelease(); } catch (_) {}
       try { if (typeof offRemove === 'function') offRemove(); } catch (_) {}
       try { if (typeof offUpdateTarget === 'function') offUpdateTarget(); } catch (_) {}
+      try { if (typeof offUpsertSchedule === 'function') offUpsertSchedule(); } catch (_) {}
+      try { if (typeof offAuthSchedule === 'function') offAuthSchedule(); } catch (_) {}
     }
 
     return {
