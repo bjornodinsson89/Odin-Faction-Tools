@@ -68,7 +68,7 @@
       position: fixed;
       top: 50%; left: 50%;
       transform: translate(-50%, -50%);
-      width: 410px; height: 760px;
+      width: 349px; height: 646px;
       min-width: 340px; min-height: 520px;
       max-width: 95vw; max-height: 95vh;
       background: var(--glass);
@@ -1598,6 +1598,10 @@ function renderSchedule() {
   if (typeof w === 'number' && w > 0) wrapper.style.width = w + 'px';
   if (typeof h === 'number' && h > 0) wrapper.style.height = h + 'px';
 
+  // If no explicit position saved, keep CSS-centered start position.
+  if (!Number.isFinite(xPct) && !Number.isFinite(yPct) && (typeof x !== 'number' || typeof y !== 'number')) return;
+
+  // Prefer normalized geometry (stable across orientation/viewport changes)
   if (Number.isFinite(xPct) && Number.isFinite(yPct)) {
     if (applyNormalizedPosIfPresent(6)) {
       reconcileGeometryForViewport(6);
@@ -1613,25 +1617,22 @@ function renderSchedule() {
   }
 }
 
-  }
-
   function openUI() {
     wrapper.style.display = 'flex';
     wrapper.setAttribute('aria-hidden', 'false');
     state.ui.open = true;
     if (state.ui.minimized) minimizeUI(true);
     applySavedGeometry();
-reconcileGeometryForViewport(6);
-if (!viewportBound) {
-  viewportBound = true;
-  window.addEventListener('resize', () => reconcileGeometryForViewport(6), { passive: true });
-  window.addEventListener('orientationchange', () => setTimeout(() => reconcileGeometryForViewport(6), 0), { passive: true });
-  if (window.visualViewport) {
-    window.visualViewport.addEventListener('resize', () => reconcileGeometryForViewport(6), { passive: true });
-    window.visualViewport.addEventListener('scroll', () => reconcileGeometryForViewport(6), { passive: true });
-  }
-}
-
+    reconcileGeometryForViewport(6);
+    if (!viewportBound) {
+      viewportBound = true;
+      window.addEventListener('resize', () => reconcileGeometryForViewport(6), { passive: true });
+      window.addEventListener('orientationchange', () => setTimeout(() => reconcileGeometryForViewport(6), 0), { passive: true });
+      if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', () => reconcileGeometryForViewport(6), { passive: true });
+        window.visualViewport.addEventListener('scroll', () => reconcileGeometryForViewport(6), { passive: true });
+      }
+    }
     try {
       renderWar(ctx.store?.get?.('war.current') || {});
       renderChain(ctx.store?.get?.('chain.current') || {});
@@ -1678,6 +1679,7 @@ if (!viewportBound) {
     if (e.changedTouches && e.changedTouches[0]) return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
     return { x: e.clientX, y: e.clientY };
   }
+
 
 function getViewportRect() {
   const vv = window.visualViewport;
@@ -1782,7 +1784,6 @@ function reconcileGeometryForViewport(margin = 6) {
   updateNormalizedPosFromPx(margin);
 }
 
-
   function onMove(e) {
     if (drag.active) {
       const p = pointFromEvent(e);
@@ -1794,7 +1795,6 @@ function reconcileGeometryForViewport(margin = 6) {
       const nx = clamp(p.x - drag.shiftX, vp.left + 6, vp.left + vp.width - w - 6);
       const ny = clamp(p.y - drag.shiftY, vp.top + 6, vp.top + vp.height - h - 6);
 
-      wrapper.style.transform = 'none';
       wrapper.style.left = nx + 'px';
       wrapper.style.top = ny + 'px';
 
@@ -1828,7 +1828,7 @@ function reconcileGeometryForViewport(margin = 6) {
     document.removeEventListener('touchmove', onMove, true);
     document.removeEventListener('touchend', onUp, true);
     document.removeEventListener('touchcancel', onUp, true);
-   reconcileGeometryForViewport(6);
+    reconcileGeometryForViewport(6);
   saveState();
 }
 
@@ -1845,12 +1845,12 @@ drag.shiftX = p.x - rectLeft;
 drag.shiftY = p.y - rectTop;
 
     wrapper.style.transform = 'none';
-    wrapper.style.left = rect.left + 'px';
-    wrapper.style.top = rect.top + 'px';
+    wrapper.style.left = rectLeft + 'px';
+    wrapper.style.top = rectTop + 'px';
 
-    state.ui.x = rect.left;
-    state.ui.y = rect.top;
-    saveState();
+    state.ui.x = rectLeft;
+    state.ui.y = rectTop;
+    updateNormalizedPosFromPx(6);
 
     document.addEventListener('mousemove', onMove, true);
     document.addEventListener('mouseup', onUp, true);
