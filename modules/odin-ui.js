@@ -2627,17 +2627,21 @@ function startDrag(e) {
 
       nexus.on?.('WAR_UPDATED', (payload) => {
         const war = payload && (payload.war || payload.data) ? (payload.war || payload.data) : payload;
+        state.war = war;
         renderWar(war);
       });
 
       nexus.on?.('CHAIN_UPDATED', (payload) => {
         const chain = payload && (payload.chain || payload.data) ? (payload.chain || payload.data) : payload;
+        state.chain = chain;
         renderChainData(chain);
       });
 
       nexus.on?.('ANALYTICS_UPDATED', (payload) => {
         const a = payload && (payload.analytics || payload.data) ? (payload.analytics || payload.data) : payload;
-        renderAnalyticsData(a || {});
+        if (!state.analytics || typeof state.analytics !== 'object') state.analytics = {};
+        Object.assign(state.analytics || {}, a || {});
+        renderAnalyticsData(state.analytics || {});
         const acc = ctx.store?.get?.('analytics.accuracy');
         renderAccuracy(acc || {});
       });
