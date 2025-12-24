@@ -68,7 +68,7 @@
       position: fixed;
       top: 50%; left: 50%;
       transform: translate(-50%, -50%);
-      width: 410px; height: 760px;
+      width: 349px; height: 646px;
       min-width: 340px; min-height: 520px;
       max-width: 95vw; max-height: 95vh;
       background: var(--glass);
@@ -952,7 +952,7 @@
 
   function loadState() {
     const base = {
-      ui: { open: false, minimized: false, x: null, y: null, w: null, h: null },
+      ui: { open: false, minimized: false, x: null, y: null, w: 349, h: 646 },
       settings: {
         api: { torn: '', tornstats: '', ffscouter: '' },
         prefs: { autoscore: false, showclaims: true, claimExpiryMin: 20 }
@@ -986,7 +986,44 @@
     localStorage.setItem(LS_KEY, JSON.stringify(state));
   }
 
-  function clamp(n, min, max) { return Math.max(min, Math.min(max, n)); }
+  
+function getViewportRect() {
+  const vv = window.visualViewport;
+  if (vv) {
+    return { left: vv.offsetLeft || 0, top: vv.offsetTop || 0, width: vv.width || window.innerWidth || document.documentElement.clientWidth, height: vv.height || window.innerHeight || document.documentElement.clientHeight };
+  }
+  return { left: 0, top: 0, width: window.innerWidth || document.documentElement.clientWidth, height: window.innerHeight || document.documentElement.clientHeight };
+}
+
+function clampWrapperToViewport(margin = 6) {
+  try {
+    const vp = getViewportRect();
+    const w = wrapper.offsetWidth || 0;
+    const h = wrapper.offsetHeight || 0;
+
+    // If centered (transform translate) don't clamp here.
+    const hasPxPos = wrapper.style.transform === 'none' && wrapper.style.left && wrapper.style.top;
+    if (!hasPxPos) return;
+
+    const curX = parseFloat(wrapper.style.left) || 0;
+    const curY = parseFloat(wrapper.style.top) || 0;
+
+    const maxX = vp.left + vp.width - w - margin;
+    const maxY = vp.top + vp.height - h - margin;
+
+    const nx = clamp(curX, vp.left + margin, maxX);
+    const ny = clamp(curY, vp.top + margin, maxY);
+
+    if (nx !== curX) wrapper.style.left = nx + 'px';
+    if (ny !== curY) wrapper.style.top = ny + 'px';
+
+    state.ui.x = nx;
+    state.ui.y = ny;
+    saveState();
+  } catch (_) {}
+}
+
+function clamp(n, min, max) { return Math.max(min, Math.min(max, n)); }
 
   function toast(message, kind = 'info') {
     const toasts = document.getElementById('odin-toasts');
@@ -1591,6 +1628,7 @@ function renderSchedule() {
   let resize = { active: false, startX: 0, startY: 0, startW: 0, startH: 0 };
   let chainSimTimer = null;
   let claimTickTimer = null;
+  let viewportBound = false;
 
   function applySavedGeometry() {
     const { x, y, w, h } = state.ui;
@@ -1600,6 +1638,7 @@ function renderSchedule() {
       wrapper.style.transform = 'none';
       wrapper.style.left = x + 'px';
       wrapper.style.top = y + 'px';
+      clampWrapperToViewport(6);
     }
   }
 
@@ -1609,6 +1648,15 @@ function renderSchedule() {
     state.ui.open = true;
     if (state.ui.minimized) minimizeUI(true);
     applySavedGeometry();
+    if (!viewportBound) {
+      viewportBound = true;
+      window.addEventListener('resize', () => clampWrapperToViewport(6), { passive: true });
+      window.addEventListener('orientationchange', () => setTimeout(() => clampWrapperToViewport(6), 0), { passive: true });
+      if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', () => clampWrapperToViewport(6), { passive: true });
+        window.visualViewport.addEventListener('scroll', () => clampWrapperToViewport(6), { passive: true });
+      }
+    }
     try {
       renderWar(ctx.store?.get?.('war.current') || {});
       renderChain(ctx.store?.get?.('chain.current') || {});
@@ -1651,22 +1699,25 @@ function renderSchedule() {
   }
 
   function pointFromEvent(e) {
-    if (e.touches && e.touches[0]) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
-    if (e.changedTouches && e.changedTouches[0]) return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
-    return { x: e.clientX, y: e.clientY };
-  }
+  const vv = window.visualViewport;
+  const ox = vv ? (vv.offsetLeft || 0) : 0;
+  const oy = vv ? (vv.offsetTop || 0) : 0;
+
+  if (e.touches && e.touches[0]) return { x: e.touches[0].clientX + ox, y: e.touches[0].clientY + oy };
+  if (e.changedTouches && e.changedTouches[0]) return { x: e.changedTouches[0].clientX + ox, y: e.changedTouches[0].clientY + oy };
+  return { x: (e.clientX || 0) + ox, y: (e.clientY || 0) + oy };
+}
 
   function onMove(e) {
     if (drag.active) {
       const p = pointFromEvent(e);
-      const vw = Math.max(document.documentElement.clientWidth, window.innerWidth || 0);
-      const vh = Math.max(document.documentElement.clientHeight, window.innerHeight || 0);
+      const vp = getViewportRect();
 
       const w = wrapper.offsetWidth;
       const h = wrapper.offsetHeight;
 
-      const nx = clamp(p.x - drag.shiftX, 6, vw - w - 6);
-      const ny = clamp(p.y - drag.shiftY, 6, vh - h - 6);
+      const nx = clamp(p.x - drag.shiftX, vp.left + 6, vp.left + vp.width - w - 6);
+      const ny = clamp(p.y - drag.shiftY, vp.top + 6, vp.top + vp.height - h - 6);
 
       wrapper.style.left = nx + 'px';
       wrapper.style.top = ny + 'px';
@@ -1678,11 +1729,10 @@ function renderSchedule() {
 
     if (resize.active) {
       const p = pointFromEvent(e);
-      const vw = Math.max(document.documentElement.clientWidth, window.innerWidth || 0);
-      const vh = Math.max(document.documentElement.clientHeight, window.innerHeight || 0);
+      const vp = getViewportRect();
 
-      const nw = clamp(resize.startW + (p.x - resize.startX), 340, vw - 12);
-      const nh = clamp(resize.startH + (p.y - resize.startY), 240, vh - 12);
+      const nw = clamp(resize.startW + (p.x - resize.startX), 340, vp.width - 12);
+      const nh = clamp(resize.startH + (p.y - resize.startY), 240, vp.height - 12);
 
       wrapper.style.width = nw + 'px';
       wrapper.style.height = nh + 'px';
@@ -1690,6 +1740,7 @@ function renderSchedule() {
       state.ui.w = nw;
       state.ui.h = nh;
       saveState();
+      clampWrapperToViewport(6);
     }
   }
 
@@ -1701,19 +1752,25 @@ function renderSchedule() {
     document.removeEventListener('touchmove', onMove, true);
     document.removeEventListener('touchend', onUp, true);
     document.removeEventListener('touchcancel', onUp, true);
+    clampWrapperToViewport(6);
   }
 
   function startDrag(e) {
     if (state.ui.minimized) return;
     drag.active = true;
+    const vp = getViewportRect();
     const rect = wrapper.getBoundingClientRect();
-    const p = pointFromEvent(e);
-    drag.shiftX = p.x - rect.left;
-    drag.shiftY = p.y - rect.top;
+    // rect.* are visual-viewport coords; convert to layout-viewport coords by adding vv offsets
+    const rectLeft = rect.left + vp.left;
+    const rectTop = rect.top + vp.top;
+
+    const p = pointFromEvent(e); // already in layout-viewport coords
+    drag.shiftX = p.x - rectLeft;
+    drag.shiftY = p.y - rectTop;
 
     wrapper.style.transform = 'none';
-    wrapper.style.left = rect.left + 'px';
-    wrapper.style.top = rect.top + 'px';
+    wrapper.style.left = rectLeft + 'px';
+    wrapper.style.top = rectTop + 'px';
 
     state.ui.x = rect.left;
     state.ui.y = rect.top;
