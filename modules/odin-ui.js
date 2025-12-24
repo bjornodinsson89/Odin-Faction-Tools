@@ -1785,6 +1785,7 @@ function reconcileGeometryForViewport(margin = 6) {
 }
 
   function onMove(e) {
+    if ((drag.active || resize.active) && e && e.cancelable) e.preventDefault();
     if (drag.active) {
       const p = pointFromEvent(e);
       const vp = getViewportRect();
@@ -1834,6 +1835,8 @@ function reconcileGeometryForViewport(margin = 6) {
 
   function startDrag(e) {
     if (state.ui.minimized) return;
+    // Prevent page scroll/gesture while dragging on touch
+    if (e && e.cancelable) e.preventDefault();
     drag.active = true;
     const vp = getViewportRect();
 const rect = wrapper.getBoundingClientRect();
@@ -1854,9 +1857,9 @@ drag.shiftY = p.y - rectTop;
 
     document.addEventListener('mousemove', onMove, true);
     document.addEventListener('mouseup', onUp, true);
-    document.addEventListener('touchmove', onMove, true);
-    document.addEventListener('touchend', onUp, true);
-    document.addEventListener('touchcancel', onUp, true);
+    document.addEventListener('touchmove', onMove, { capture: true, passive: false });
+    document.addEventListener('touchend', onUp, { capture: true, passive: true });
+    document.addEventListener('touchcancel', onUp, { capture: true, passive: true });
   }
 
   function startResize(e) {
@@ -1870,9 +1873,9 @@ drag.shiftY = p.y - rectTop;
 
     document.addEventListener('mousemove', onMove, true);
     document.addEventListener('mouseup', onUp, true);
-    document.addEventListener('touchmove', onMove, true);
-    document.addEventListener('touchend', onUp, true);
-    document.addEventListener('touchcancel', onUp, true);
+    document.addEventListener('touchmove', onMove, { capture: true, passive: false });
+    document.addEventListener('touchend', onUp, { capture: true, passive: true });
+    document.addEventListener('touchcancel', onUp, { capture: true, passive: true });
   }
 
   function openModal(slotLabel) {
@@ -2071,8 +2074,9 @@ drag.shiftY = p.y - rectTop;
 
   hud.addEventListener('touchstart', (e) => {
     if (e.target && (e.target.id === 'odin-close' || e.target.id === 'odin-minimize')) return;
+    if (e.cancelable) e.preventDefault();
     startDrag(e);
-  }, { capture: true, passive: true });
+  }, { capture: true, passive: false });
 
   resizer.addEventListener('mousedown', (e) => {
     e.preventDefault();
