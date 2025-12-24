@@ -125,7 +125,7 @@
           .catch(reject);
       }
     });
-  }; 
+  };
 
   function verifyModulesLoaded() {
     const moduleCount = Array.isArray(window.OdinModules) ? window.OdinModules.length : 0;
@@ -185,16 +185,6 @@
     // ========================================
     // INITIALIZATION SEQUENCE - LOCAL-FIRST ARCHITECTURE
     // ========================================
-    // The initialization follows a strict order to ensure:
-    // 1. Utils and logging are available first
-    // 2. Data layer (API, Storage) is ready before controllers
-    // 3. Controllers (handlers, AI) are ready before UI
-    // 4. UI starts immediately without waiting for Firebase connection
-    //
-    // CRITICAL: All module init() functions are SYNCHRONOUS and NON-BLOCKING.
-    // Firebase connection happens in the background - the UI does NOT wait for it.
-    // The app is fully functional offline using local storage.
-    // ========================================
 
     console.log('[Odin] ========================================');
     console.log('[Odin] Initializing Odin\'s Spear runtime...');
@@ -202,17 +192,13 @@
     console.log('[Odin] LOCAL-FIRST: UI will render immediately, Firebase syncs in background');
     console.log('[Odin] ========================================');
 
-    // Enforce deterministic module init sequence (prevents lost Nexus events)
+    // Enforce deterministic module init sequence
     const moduleOrder = [
-      'log-manager',        // Core: Logging system
-      'odin-api-config',    // Data: Torn/TornStats/FFScouter API client
-      'firebase-service',   // Data: Firebase (connects in background)
-      'access-control',     // Controllers: Role management
-      'action-handler',     // Controllers: Local-first targets/claims
-      'freki-ai',           // Controllers: Freki AI scoring
-      'player-info',        // Data: Player info auto-fetcher
-      'odin-ui-manager',    // UI: Main UI manager
-      'ui-profile-injection'// UI: Profile page injection
+      'odin-api',
+      'firebase-service',
+      'freki-ai',
+      'odins-spear',
+      'odin-ui',
     ];
 
     if (Array.isArray(window.OdinModules)) {
