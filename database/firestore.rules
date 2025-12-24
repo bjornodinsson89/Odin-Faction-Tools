@@ -1,4 +1,4 @@
-rules_version = '3';
+rules_version = '2';
 // Odin Faction Tools - Firestore Security Rules
 // Version: 5.1.0
 service cloud.firestore {
