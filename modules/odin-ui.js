@@ -1225,6 +1225,52 @@
     }
   }
 
+
+  function recomputeWatchersFromSchedule() {
+    try {
+      const sched = state.schedule && typeof state.schedule === 'object' ? state.schedule : { slots: {} };
+      const slots = (sched.slots && typeof sched.slots === 'object') ? sched.slots : {};
+      const today = new Date();
+      const dayIdx = today.getDay(); // 0=Sun..6=Sat
+      const out = [];
+
+      for (let s = 0; s < SLOTS.length; s++) {
+        const key = slotKey(dayIdx, s);
+        const raw = slots[key];
+        const name = (raw && typeof raw === 'object') ? String(raw.name || '').trim() : String(raw || '').trim();
+        if (!name) continue;
+
+        out.push({
+          id: (raw && typeof raw === 'object' && raw.tornId) ? String(raw.tornId) : name,
+          name,
+          slot: SLOTS[s],
+          status: '—'
+        });
+      }
+
+      state.watchers = out;
+    } catch (e) {
+      // Non-fatal
+    }
+  }
+
+  function syncScheduleFromStore() {
+    try {
+      const sched = (ctx && ctx.store && typeof ctx.store.get === 'function') ? ctx.store.get('schedule', null) : null;
+      if (sched && typeof sched === 'object') {
+        if (!state.schedule || typeof state.schedule !== 'object') state.schedule = { slots: {} };
+        const nextSlots = (sched.slots && typeof sched.slots === 'object') ? sched.slots : {};
+        state.schedule.slots = nextSlots;
+        recomputeWatchersFromSchedule();
+        renderSchedule();
+        renderWatchers();
+        saveState();
+      }
+    } catch (e) {
+      // Non-fatal
+    }
+  }
+
   function renderWatchers() {
     watchersTbody.textContent = '';
     const list = state.watchers.slice(0, 12);
@@ -1283,7 +1329,8 @@
       for (let d = 0; d < DAYS.length; d++) {
         const td = document.createElement('td');
         const key = slotKey(d, s);
-        const val = state.schedule.slots[key] || '';
+        const raw = (state.schedule && state.schedule.slots) ? state.schedule.slots[key] : null;
+        const val = (raw && typeof raw === 'object') ? (raw.name || '') : (raw || '');
         const isGap = !val;
         const badge = isGap ? `<span class="badge bad">GAP</span>` : `<span class="badge ok">${val}</span>`;
         td.innerHTML = `
@@ -1298,7 +1345,12 @@
     }
 
     const total = DAYS.length * SLOTS.length;
-    const filled = Object.values(state.schedule.slots).filter(Boolean).length;
+    const filled = Object.values((state.schedule && state.schedule.slots) ? state.schedule.slots : {}).filter(v => {
+      if (!v) return false;
+      if (typeof v === 'string') return !!v.trim();
+      if (typeof v === 'object') return !!String(v.name || '').trim();
+      return false;
+    }).length;
     const pct = Math.round((filled / total) * 100);
     scheduleCoverage.textContent = `${filled}/${total} (${pct}%)`;
 
@@ -1868,14 +1920,23 @@
       const label = `${DAYS[d]} ${SLOTS[s]}`;
       openModal(label);
       modalConfirm.onclick = () => {
-        state.schedule.slots[slotKey(d, s)] = 'You';
-        saveState();
-        renderSchedule();
+        const key = slotKey(d, s);
+        let me = null;
+        try { me = (ctx && ctx.store && typeof ctx.store.get === 'function') ? ctx.store.get('playerInfo.current', null) : null; } catch (_) { me = null; }
+        const meName = (me && typeof me === 'object' && me.name) ? String(me.name) : 'You';
+        const meId = (me && typeof me === 'object' && (me.player_id || me.playerId)) ? String(me.player_id || me.playerId) : null;
+
+        const slot = { tornId: meId, name: meName };
+        // Local-first: ActionHandler will persist locally immediately and queue DB sync
+        nexus.emit('UPSERT_SCHEDULE_SLOT', { key, dayIndex: d, slotIndex: s, slot });
+
         toast(`Signed up: ${label}`, 'ok');
         closeModal();
       };
       return;
     }
+
+
 
     if (action === 'analyze-coverage') { renderSchedule(); toast('Coverage analyzed', 'ok'); return; }
 
@@ -2058,6 +2119,21 @@
 
       nexus.on?.('FIREBASE_CONNECTED', () => { try { setBadge('db-pill', 'ok'); } catch (_) {} });
       nexus.on?.('FIREBASE_DISCONNECTED', () => { try { setBadge('db-pill', 'bad'); } catch (_) {} });
+
+      nexus.on?.('SCHEDULE_UPDATED', (payload) => {
+        try {
+          if (payload && payload.schedule && typeof payload.schedule === 'object') {
+            if (!state.schedule || typeof state.schedule !== 'object') state.schedule = { slots: {} };
+            state.schedule.slots = (payload.schedule.slots && typeof payload.schedule.slots === 'object') ? payload.schedule.slots : {};
+            recomputeWatchersFromSchedule();
+            renderSchedule();
+            renderWatchers();
+            saveState();
+          } else {
+            syncScheduleFromStore();
+          }
+        } catch (_) {}
+      });
     } catch (e) {
       console.warn('[ODIN_UI] wireNexusSubscriptions failed:', e);
     }
@@ -2066,6 +2142,7 @@
   wireNexusSubscriptions();
   syncTargetsFromStore();
   syncPlayerInfoFromStore();
+  syncScheduleFromStore();
   ensureSeedData();
   applySavedGeometry();
   applySettingsToInputs();
