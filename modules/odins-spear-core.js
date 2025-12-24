@@ -1195,7 +1195,359 @@
     return ROLE_RANK[normalizeRole(role)] || 1;
   }
 
-  window.OdinModules.push(function AccessControlModuleInit(ctx) {
+  
+/* ============================================================
+   WarChainAnalyticsProducer v5.0.0
+   - Local-first session analytics (derived from Torn personalstats deltas)
+   - War + chain polling (Torn API) into store
+   - Accuracy outcomes stored locally + optional Freki training
+   Emits:
+     WAR_UPDATED, CHAIN_UPDATED, ANALYTICS_UPDATED, ACCURACY_UPDATED
+   ============================================================ */
+(function () {
+  'use strict';
+
+  if (!window.OdinModules) window.OdinModules = [];
+
+  window.OdinModules.push(function WarChainAnalyticsProducerInit(ctx) {
+    const nexus = ctx.nexus;
+    const store = ctx.store;
+    const api = ctx.api;
+    const log = ctx.log || console.log;
+
+    let warTimer = null;
+    let chainTimer = null;
+    let statsTimer = null;
+
+    let baseStats = null;
+
+    function nowSec() { return Math.floor(Date.now() / 1000); }
+
+    function pickNumber(obj, keys) {
+      if (!obj || typeof obj !== 'object') return null;
+      for (const k of keys) {
+        if (Object.prototype.hasOwnProperty.call(obj, k) && obj[k] != null && obj[k] !== '') {
+          const n = Number(obj[k]);
+          if (Number.isFinite(n)) return n;
+        }
+      }
+      return null;
+    }
+
+    function fmtTimeFromSeconds(sec) {
+      if (sec == null) return null;
+      const s = Math.max(0, Math.floor(Number(sec)));
+      const mm = String(Math.floor(s / 60)).padStart(2, '0');
+      const ss = String(s % 60).padStart(2, '0');
+      return `${mm}:${ss}`;
+    }
+
+    function safeSet(key, val) {
+      try { store?.set?.(key, val); } catch (_) {}
+    }
+
+    function emitSafe(topic, payload) {
+      try { nexus?.emit?.(topic, payload); } catch (_) {}
+    }
+
+    function getFactionId() {
+      try {
+        const fid = store?.get?.('auth.factionId');
+        return fid ? String(fid) : null;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function getTornId() {
+      try {
+        const tid = store?.get?.('auth.tornId');
+        return tid ? String(tid) : null;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function stopTimers() {
+      if (warTimer) { clearInterval(warTimer); warTimer = null; }
+      if (chainTimer) { clearInterval(chainTimer); chainTimer = null; }
+      if (statsTimer) { clearInterval(statsTimer); statsTimer = null; }
+    }
+
+    function normalizeWarPayload(raw, factionId) {
+      const war = { online: false, lastUpdated: Date.now(), friendlyScore: null, enemyScore: null, raw: null };
+      if (!raw) return war;
+
+      let candidate = null;
+
+      // Torn selections sometimes return { rankedwars: {...} } or { wars: {...} } or direct object map
+      const root = raw.rankedwars || raw.wars || raw;
+      if (root && typeof root === 'object') {
+        const vals = Array.isArray(root) ? root : Object.values(root);
+        candidate = vals.find(w => w && typeof w === 'object' && (
+          String(w.status || '').toLowerCase() === 'active' ||
+          String(w.status || '').toLowerCase() === 'ongoing' ||
+          String(w.status || '').toLowerCase() === 'started' ||
+          (w.end && Number(w.end) > nowSec()) ||
+          (w.start && Number(w.start) <= nowSec())
+        )) || vals.find(w => w && typeof w === 'object') || null;
+      }
+
+      if (!candidate || typeof candidate !== 'object') return war;
+
+      war.online = true;
+      war.raw = candidate;
+
+      const fid = factionId ? String(factionId) : null;
+
+      // Common shapes: { factions: { "123": { score }, "456": { score } } }
+      if (candidate.factions && typeof candidate.factions === 'object' && !Array.isArray(candidate.factions)) {
+        const factions = candidate.factions;
+        const ours = fid && factions[fid] ? factions[fid] : null;
+        const otherEntry = Object.entries(factions).find(([k]) => !fid || String(k) !== fid) || null;
+        const theirs = otherEntry ? otherEntry[1] : null;
+
+        const ourScore = ours ? pickNumber(ours, ['score', 'points', 'current_score']) : null;
+        const theirScore = theirs ? pickNumber(theirs, ['score', 'points', 'current_score']) : null;
+
+        war.friendlyScore = ourScore;
+        war.enemyScore = theirScore;
+        return war;
+      }
+
+      // Alternative: { faction1: { id, score }, faction2: { id, score } }
+      const f1 = candidate.faction1 || candidate.faction_1 || null;
+      const f2 = candidate.faction2 || candidate.faction_2 || null;
+      if (f1 && f2 && typeof f1 === 'object' && typeof f2 === 'object') {
+        const f1id = f1.id != null ? String(f1.id) : null;
+        const f2id = f2.id != null ? String(f2.id) : null;
+        const s1 = pickNumber(f1, ['score', 'points']);
+        const s2 = pickNumber(f2, ['score', 'points']);
+
+        if (fid && f1id === fid) {
+          war.friendlyScore = s1;
+          war.enemyScore = s2;
+        } else if (fid && f2id === fid) {
+          war.friendlyScore = s2;
+          war.enemyScore = s1;
+        } else {
+          war.friendlyScore = s1;
+          war.enemyScore = s2;
+        }
+      }
+
+      return war;
+    }
+
+    function normalizeChainPayload(raw) {
+      const chain = { lastUpdated: Date.now(), our: null, ourTimeout: null, ourText: null, enemyText: '—', recommendation: '—', riskClass: 'warn', riskText: 'RISK: —', raw: null };
+      if (!raw) return chain;
+
+      const root = raw.chain || raw;
+      if (!root || typeof root !== 'object') return chain;
+
+      chain.raw = root;
+
+      const current = pickNumber(root, ['current', 'chain', 'value']);
+      const timeout = pickNumber(root, ['timeout', 'time', 'seconds']);
+
+      chain.our = current;
+      chain.ourTimeout = timeout;
+
+      if (current != null && timeout != null) chain.ourText = `${current} / ${fmtTimeFromSeconds(timeout)}`;
+      else if (current != null) chain.ourText = String(current);
+      else chain.ourText = '—';
+
+      const t = timeout != null ? Number(timeout) : null;
+      if (t == null) {
+        chain.riskClass = 'warn';
+        chain.riskText = 'RISK: —';
+      } else if (t <= 120) {
+        chain.riskClass = 'bad';
+        chain.riskText = 'RISK: HIGH';
+      } else if (t <= 300) {
+        chain.riskClass = 'warn';
+        chain.riskText = 'RISK: MED';
+      } else {
+        chain.riskClass = 'ok';
+        chain.riskText = 'RISK: LOW';
+      }
+
+      if (current != null && t != null) {
+        chain.recommendation = t <= 120 ? 'Push chain now' : t <= 300 ? 'Keep hitters active' : 'Stable window';
+      }
+
+      return chain;
+    }
+
+    async function refreshWar() {
+      if (!api || typeof api.getFactionRankedWars !== 'function' || typeof api.getFactionWars !== 'function') return;
+      const factionId = getFactionId();
+      if (!factionId) return;
+      try {
+        // Prefer rankedwars, fallback to wars
+        let raw = null;
+        try { raw = await api.getFactionRankedWars(factionId); } catch (_) { raw = null; }
+        if (!raw) raw = await api.getFactionWars(factionId);
+
+        const war = normalizeWarPayload(raw, factionId);
+        safeSet('war.current', war);
+        emitSafe('WAR_UPDATED', { war });
+      } catch (e) {
+        safeSet('war.current', { online: false, lastUpdated: Date.now(), friendlyScore: null, enemyScore: null, error: String(e && e.message ? e.message : e) });
+        emitSafe('WAR_UPDATED', { war: store?.get?.('war.current') });
+      }
+    }
+
+    async function refreshChain() {
+      if (!api || typeof api.getFactionChain !== 'function') return;
+      const factionId = getFactionId();
+      if (!factionId) return;
+      try {
+        const raw = await api.getFactionChain(factionId);
+        const chain = normalizeChainPayload(raw);
+        safeSet('chain.current', chain);
+        emitSafe('CHAIN_UPDATED', { chain });
+      } catch (e) {
+        safeSet('chain.current', { lastUpdated: Date.now(), ourText: '—', enemyText: '—', recommendation: '—', riskClass: 'warn', riskText: 'RISK: —', error: String(e && e.message ? e.message : e) });
+        emitSafe('CHAIN_UPDATED', { chain: store?.get?.('chain.current') });
+      }
+    }
+
+    async function refreshSessionAnalytics() {
+      if (!api || typeof api.getUser !== 'function') return;
+      const tornId = getTornId(); // optional; endpoint 'user' works without it
+      try {
+        const raw = await api.getUser(tornId || null, 'personalstats');
+        const ps = raw && raw.personalstats ? raw.personalstats : raw;
+
+        const hits = pickNumber(ps, ['attackswon', 'attacks_won', 'attacksWon', 'attackswon_total']);
+        const assists = pickNumber(ps, ['attackassistant', 'attack_assist', 'assists', 'attacksassist', 'attacks_assist']);
+        const respect = pickNumber(ps, ['respectforfaction', 'respect_for_faction', 'respect', 'respect_gained']);
+
+        if (!baseStats) {
+          baseStats = { hits: hits || 0, assists: assists || 0, respect: respect || 0 };
+        }
+
+        const session = {
+          hitsLanded: Math.max(0, (hits || 0) - (baseStats.hits || 0)),
+          assists: Math.max(0, (assists || 0) - (baseStats.assists || 0)),
+          totalRespect: Math.max(0, (respect || 0) - (baseStats.respect || 0)),
+          lastUpdated: Date.now()
+        };
+
+        safeSet('analytics.session', session);
+        emitSafe('ANALYTICS_UPDATED', { analytics: session });
+      } catch (e) {
+        const fallback = store?.get?.('analytics.session') || { hitsLanded: 0, assists: 0, totalRespect: 0, lastUpdated: Date.now(), error: String(e && e.message ? e.message : e) };
+        safeSet('analytics.session', fallback);
+        emitSafe('ANALYTICS_UPDATED', { analytics: fallback });
+      }
+    }
+
+    function ensureAccuracyStore() {
+      const cur = store?.get?.('analytics.accuracy');
+      if (cur && typeof cur === 'object') return cur;
+      const init = { wins: 0, losses: 0, lastUpdated: Date.now() };
+      safeSet('analytics.accuracy', init);
+      return init;
+    }
+
+    async function onRecordOutcome(payload) {
+      const p = payload && typeof payload === 'object' ? payload : {};
+      const result = String(p.result || '').toLowerCase() === 'win' ? 'win' : String(p.result || '').toLowerCase() === 'loss' ? 'loss' : null;
+      if (!result) return;
+
+      const acc = ensureAccuracyStore();
+      if (result === 'win') acc.wins = Number(acc.wins || 0) + 1;
+      if (result === 'loss') acc.losses = Number(acc.losses || 0) + 1;
+      acc.lastUpdated = Date.now();
+      safeSet('analytics.accuracy', acc);
+      emitSafe('ACCURACY_UPDATED', { accuracy: acc });
+
+      // Optional Freki training if target data is available
+      try {
+        const targetId = p.targetId ? String(p.targetId) : null;
+        if (targetId && ctx.freki && typeof ctx.freki.recordFightOutcome === 'function') {
+          const targets = store?.get?.('targets') || [];
+          const t = Array.isArray(targets) ? targets.find(x => x && String(x.id) === targetId) : null;
+          if (t) {
+            const inWar = !!(store?.get?.('war.current') && store?.get?.('war.current').online);
+            const chain = store?.get?.('chain.current') && store?.get?.('chain.current').our != null ? store?.get?.('chain.current').our : null;
+            ctx.freki.recordFightOutcome({
+              targetId,
+              targetLevel: t.level || 1,
+              targetStatus: t.status || 'Unknown',
+              result,
+              respect: null,
+              fairFight: t.fairFight != null ? t.fairFight : null,
+              chain: chain,
+              inWar
+            });
+          }
+        }
+      } catch (_) {}
+    }
+
+    function start() {
+      stopTimers();
+
+      // DB status reflection for analytics pane badge
+      nexus?.on?.('FIREBASE_CONNECTED', () => { safeSet('db.status', 'connected'); emitSafe('ANALYTICS_UPDATED', { analytics: store?.get?.('analytics.session') || { hitsLanded: 0, assists: 0, totalRespect: 0 } }); });
+      nexus?.on?.('FIREBASE_DISCONNECTED', () => { safeSet('db.status', 'offline'); emitSafe('ANALYTICS_UPDATED', { analytics: store?.get?.('analytics.session') || { hitsLanded: 0, assists: 0, totalRespect: 0 } }); });
+
+      nexus?.on?.('ANALYTICS_RECORD_OUTCOME', onRecordOutcome);
+
+      // Start polling only when factionId exists
+      const fid = getFactionId();
+      if (!fid) return;
+
+      refreshWar();
+      refreshChain();
+      refreshSessionAnalytics();
+      ensureAccuracyStore();
+
+      warTimer = setInterval(refreshWar, 30000);
+      chainTimer = setInterval(refreshChain, 30000);
+      statsTimer = setInterval(refreshSessionAnalytics, 60000);
+    }
+
+    let unsubAuth = null;
+    let unsubWarReq = null;
+    let unsubChainReq = null;
+
+    function init() {
+      start();
+      unsubAuth = nexus?.on?.('AUTH_STATE_CHANGED', () => {
+        baseStats = null;
+        start();
+      }) || null;
+
+      unsubWarReq = nexus?.on?.('WAR_REFRESH_REQUEST', () => refreshWar()) || null;
+      unsubChainReq = nexus?.on?.('CHAIN_REFRESH_REQUEST', () => refreshChain()) || null;
+
+      // Initial paint
+      emitSafe('WAR_UPDATED', { war: store?.get?.('war.current') || { online: false } });
+      emitSafe('CHAIN_UPDATED', { chain: store?.get?.('chain.current') || {} });
+      emitSafe('ANALYTICS_UPDATED', { analytics: store?.get?.('analytics.session') || { hitsLanded: 0, assists: 0, totalRespect: 0 } });
+      emitSafe('ACCURACY_UPDATED', { accuracy: store?.get?.('analytics.accuracy') || { wins: 0, losses: 0 } });
+
+      log('[Odin] War/Chain/Analytics producer ready');
+    }
+
+    function destroy() {
+      stopTimers();
+      try { if (unsubAuth) unsubAuth(); } catch (_) {}
+      try { if (unsubWarReq) unsubWarReq(); } catch (_) {}
+      try { if (unsubChainReq) unsubChainReq(); } catch (_) {}
+    }
+
+    return { id: 'war-chain-analytics', init, destroy };
+  });
+})();
+
+
+window.OdinModules.push(function AccessControlModuleInit(ctx) {
     const nexus = ctx.nexus;
     const store = ctx.store;
     const log = ctx.log || console.log;
